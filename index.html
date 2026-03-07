@@ -244,8 +244,8 @@
     .filtersGrid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
     .topupPanel{ margin-top:10px; padding:12px; border-radius:16px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); }
     .topupRow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .topupTag{ font-size:11px; font-weight:900; letter-spacing:.5px; text-transform:uppercase; color:#7dd3fc; opacity:.95; }
-    .btn.neon{background: linear-gradient(180deg,#59e3ff,#0ea5e9); color:#031424; box-shadow:0 0 16px rgba(56,189,248,.35);}
+    .topupTag{ font-size:11px; font-weight:900; letter-spacing:.5px; text-transform:uppercase; color:#cbd5e1; opacity:.95; }
+    .btn.neon{background: linear-gradient(180deg,#59e3ff,#0ea5e9); color:#031424; box-shadow:none;}
     .btn.neon:active{ opacity:.95; }
 
     .switch{
@@ -909,22 +909,6 @@
           <div class="muted">Баланс: <b id="balanceVal">0</b></div>
         </div>
         <div class="muted" id="balanceBreakdown" style="margin-top:6px;">TON: 0 • STARS: 0</div>
-        <div class="row" style="margin-top:8px;">
-          <button class="btn gray" id="btnTopupTon">Connect TON Wallet</button>
-          <div class="muted" id="tonWalletInfo">Кошелёк не подключен</div>
-          <div class="muted" id="tonWalletBalanceInfo" style="font-size:12px;opacity:.8;">Баланс кошелька: —</div>
-        </div>
-        <div class="row" id="tonTopupControls" style="margin-top:8px; display:none;">
-          <input class="input" id="topupTonInput" type="number" min="0.1" step="0.1" value="0.1" style="max-width:120px;" />
-          <button class="btn blue" id="btnPayTon">Пополнить TON</button>
-        </div>
-        <div class="topupPanel">
-          <div class="topupTag">TELEGRAM STARS</div>
-          <div class="topupRow" style="margin-top:6px;">
-            <button class="btn neon" id="btnTopupStars">Пополнить ⭐</button>
-            <input class="input" id="topupStarsInput" type="number" min="1" step="1" value="1" style="max-width:120px;" />
-          </div>
-        </div>
 
         <div style="height:10px;"></div>
         <div class="row" style="justify-content:space-between; gap:12px;">
@@ -1158,6 +1142,32 @@
   </div>
 
 
+  <div class="overlayModal" id="topupOverlay" style="display:none;">
+    <div class="modalCard">
+      <div class="row" style="justify-content:space-between; align-items:center; gap:8px;">
+        <div class="resultTitle">Пополнение баланса</div>
+        <button class="btn gray" id="btnCloseTopup">Закрыть</button>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn gray" id="btnTopupTon">Подключить TON кошелёк</button>
+        <div class="muted" id="tonWalletInfo">Кошелёк не подключен</div>
+        <div class="muted" id="tonWalletBalanceInfo" style="font-size:12px;opacity:.8;">Баланс кошелька: —</div>
+      </div>
+      <div class="row" id="tonTopupControls" style="margin-top:8px; display:none;">
+        <input class="input" id="topupTonInput" type="number" min="0.1" step="0.1" value="0.1" style="max-width:120px;" />
+        <button class="btn blue" id="btnPayTon">Пополнить TON</button>
+      </div>
+      <div class="topupPanel" style="margin-top:10px;">
+        <div class="topupTag">TELEGRAM STARS</div>
+        <div class="topupRow" style="margin-top:6px;">
+          <input class="input" id="topupStarsInput" type="number" min="1" step="1" value="1" style="max-width:120px;" />
+          <button class="btn neon" id="btnTopupStars">Пополнить ⭐</button>
+        </div>
+      </div>
+      <div class="muted" id="tonOrderInfo" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
   <div class="overlayModal" id="uiModal" style="display:none;">
     <div class="modalCard">
       <div class="resultTitle" id="uiModalTitle">Статус</div>
@@ -1175,14 +1185,28 @@
 
   const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
   const API_ORIGIN = (window.__API_ORIGIN__ || localStorage.getItem("evil_api_origin") || "").trim();
-  const API_PREFIX = (window.__API_PREFIX__ || localStorage.getItem("evil_api_prefix") || "").trim();
+  const API_PREFIX_RAW = (window.__API_PREFIX__ || localStorage.getItem("evil_api_prefix") || "/api").trim();
+
+  function normalizePrefix(v) {
+    const raw = String(v || "").trim();
+    if (!raw) return "";
+    const withSlash = raw.startsWith("/") ? raw : `/${raw}`;
+    return withSlash.replace(/\/+$/, "");
+  }
+
+  const API_PREFIXES = Array.from(new Set([
+    ...String(API_PREFIX_RAW || "")
+      .split(",")
+      .map(normalizePrefix)
+      .filter(Boolean),
+    "/api"
+  ]));
 
   function normalizeApiBase(){
     if (/^https?:\/\//i.test(API_ORIGIN)) {
       return API_ORIGIN.replace(/\/$/, "");
     }
-    const cleanPrefix = API_PREFIX ? (API_PREFIX.startsWith("/") ? API_PREFIX : `/${API_PREFIX}`) : "";
-    return (location.origin + cleanPrefix).replace(/\/$/, "");
+    return location.origin;
   }
 
   const API_BASE = normalizeApiBase();
@@ -1332,7 +1356,6 @@
     uiModal.style.display = "none";
     if (topupOverlay) topupOverlay.style.display = "flex";
     if (currency === "ton") {
-      btnTopupTon.click();
       topupTonInput.focus();
     } else {
       topupStarsInput.focus();
@@ -1655,14 +1678,15 @@
     linkedWalletAddress = String(wallet?.account?.address || "");
     sendMsg({ type:"wallet_bind", walletAddress: linkedWalletAddress, userKey });
     if (linkedWalletAddress) await refreshWalletBalanceUi();
+    else walletTonBalance = null;
     syncTonTopupUi();
   });
 
-  function buildApiPath(urlPath) {
+  function buildApiPath(urlPath, prefix = "") {
     if (/^https?:\/\//.test(urlPath)) return urlPath;
     const clean = String(urlPath || "").startsWith("/") ? String(urlPath) : `/${urlPath}`;
-    if (API_BASE) return `${API_BASE}${clean}`;
-    return clean;
+    const pref = normalizePrefix(prefix);
+    return `${API_BASE}${pref}${clean}`;
   }
 
   async function safeFetchJson(url, options = {}) {
@@ -1670,16 +1694,17 @@
     reqOptions.headers = { "Content-Type": "application/json", ...(options.headers || {}) };
 
     const clean = String(url || "").startsWith("/") ? String(url) : `/${url}`;
-    const candidates = [buildApiPath(clean)];
+    const candidates = [];
     if (/^\/pay\//.test(clean)) {
-      const apiCandidate = `${location.origin}/api${clean}`;
-      const bareCandidate = `${location.origin}${clean}`;
-      if (!candidates.includes(apiCandidate)) candidates.push(apiCandidate);
-      if (!candidates.includes(bareCandidate)) candidates.push(bareCandidate);
+      for (const pref of API_PREFIXES) candidates.push(buildApiPath(clean, pref));
+      candidates.push(buildApiPath(clean, ""));
+    } else {
+      for (const pref of API_PREFIXES) candidates.push(buildApiPath(clean, pref));
+      candidates.push(buildApiPath(clean, ""));
     }
 
     let lastErr = null;
-    for (const finalUrl of candidates) {
+    for (const finalUrl of Array.from(new Set(candidates))) {
       const r = await fetch(finalUrl, reqOptions);
       const text = await r.text();
       const isJson = (r.headers.get("content-type") || "").includes("application/json");
@@ -1711,11 +1736,11 @@
     if (walletDisconnectLink) {
       walletDisconnectLink.onclick = () => {
         openModal({
-          title: "Disconnect wallet?",
+          title: "Отключить кошелёк?",
           text: "Вы уверены, что хотите отключить TON кошелёк?",
           actions: [
             {
-              label: "Yes",
+              label: "Да",
               variant: "red",
               onClick: async () => {
                 try {
@@ -1727,29 +1752,19 @@
                 syncTonTopupUi();
               }
             },
-            { label: "No", variant: "gray" }
+            { label: "Нет", variant: "gray" }
           ]
         });
       };
     }
   }
   syncTonTopupUi();
-
-
-  async function buildTonCommentPayload(comment) {
-    const text = String(comment || "");
-    if (!text) return undefined;
-    try {
-      const cell = new TonWeb.boc.Cell();
-      cell.bits.writeUint(0, 32);
-      cell.bits.writeBytes(TonWeb.utils.stringToBytes(text));
-      const boc = await cell.toBoc(false);
-      return TonWeb.utils.bytesToBase64(boc);
-    } catch (e) {
-      console.warn("[ton] payload encode fallback", e?.message || e);
-      return btoa(unescape(encodeURIComponent(text)));
-    }
+  if (tonConnectUI?.account?.address) {
+    linkedWalletAddress = String(tonConnectUI.account.address);
+    sendMsg({ type:"wallet_bind", walletAddress: linkedWalletAddress, userKey });
+    refreshWalletBalanceUi().finally(syncTonTopupUi);
   }
+
 
   async function pollTonConfirm(orderId, userId) {
     const started = Date.now();
@@ -1781,6 +1796,8 @@
       if (tg && typeof tg.openInvoice === "function") {
         tg.openInvoice(j.url, async (status) => {
           if (status === "paid") {
+            currentBalances.stars = Math.floor(Number(currentBalances.stars || 0)) + stars;
+            renderBalance();
             showToast("Оплата Stars успешна", "success");
             requestBalance();
             requestLists();
@@ -1796,7 +1813,7 @@
 
 
   btnTopupTon.onclick = async () => {
-    if (!tonConnectUI) { tonOrderInfo.textContent = "TON Connect недоступен"; return; }
+    if (!tonConnectUI) { tonOrderInfo.textContent = "TonConnect недоступен"; return; }
     if (!tonConnectUI.connected) await tonConnectUI.openModal();
     if (tonConnectUI.account?.address) {
       linkedWalletAddress = tonConnectUI.account.address;
@@ -1820,10 +1837,9 @@
       });
       pendingTonOrder = ord;
       tonOrderInfo.textContent = `Оплата TON: ${ton} отправлена...`;
-      const payload = await buildTonCommentPayload(ord.comment || "");
       await tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [{ address: ord.to, amount: ord.amountNano, payload }]
+        messages: [{ address: ord.to, amount: ord.amountNano, payload: ord.comment }]
       });
       const ok = await pollTonConfirm(ord.orderId, userId);
       tonOrderInfo.textContent = ok ? `Вы пополнили ${ton} TON успешно` : "Не удалось подтвердить TON за время ожидания";

@@ -3,6 +3,30 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
+function loadEnvFile() {
+  const envPath = path.join(__dirname, ".env");
+  if (!fs.existsSync(envPath)) return;
+  try {
+    const raw = fs.readFileSync(envPath, "utf8");
+    for (const line of raw.split(/\r?\n/)) {
+      const row = String(line || "").trim();
+      if (!row || row.startsWith("#")) continue;
+      const m = row.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!m) continue;
+      const key = m[1];
+      let val = m[2] || "";
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (!(key in process.env)) process.env[key] = val;
+    }
+  } catch (e) {
+    console.warn("[env] failed to read .env:", e?.message || e);
+  }
+}
+
+loadEnvFile();
+
 const PORT = Number(process.env.PORT || 3000);
 const TURN_MS = 30000;
 const REJOIN_GRACE_MS = 30000;
@@ -142,6 +166,23 @@ const PAYMENT_ROUTES = new Set([
   "/pay/ton/wallet-balance"
 ]);
 
+function parseApiPrefixes() {
+  const raw = String(process.env.API_PREFIX || "/api").trim();
+  if (!raw) return ["/api"];
+  const out = raw
+    .split(",")
+    .map(v => String(v || "").trim())
+    .filter(Boolean)
+    .map(v => {
+      const n = v.startsWith("/") ? v : `/${v}`;
+      return n.replace(/\/+$/, "") || "/";
+    });
+  if (!out.includes("/api")) out.push("/api");
+  return Array.from(new Set(out));
+}
+
+const API_PREFIXES = parseApiPrefixes();
+
 function getRequestPath(reqUrl) {
   try {
     const u = new URL(reqUrl || "/", "http://localhost");
@@ -153,8 +194,15 @@ function getRequestPath(reqUrl) {
 }
 
 function toApiPath(pathname) {
-  if (pathname === "/api") return "/";
-  return pathname.startsWith("/api/") ? pathname.slice(4) : pathname;
+  const clean = String(pathname || "/").replace(/\/+$/, "") || "/";
+  for (const prefix of API_PREFIXES) {
+    if (clean === prefix) return "/";
+    if (clean.startsWith(prefix + "/")) {
+      const v = clean.slice(prefix.length);
+      return v.startsWith("/") ? v : `/${v}`;
+    }
+  }
+  return clean;
 }
 
 function writeJson(res, code, data, extraHeaders = {}) {
@@ -168,7 +216,10 @@ function logEnvWarnings() {
   if (!process.env.TON_RECEIVER) missing.push("TON_RECEIVER");
   if (!process.env.TONCENTER_API_KEY) missing.push("TONCENTER_API_KEY");
   if (!process.env.ADMIN_SECRET) missing.push("ADMIN_SECRET");
-  if (missing.length) console.warn("[env] missing:", missing.join(", "));
+  if (!process.env.ADMIN_IDS) missing.push("ADMIN_IDS");
+  if (!String(process.env.PUBLIC_BASE_URL || "").trim()) missing.push("PUBLIC_BASE_URL");
+  if (missing.length) console.warn("[env] critical env missing:", missing.join(", "));
+  console.info("[env] api prefixes:", API_PREFIXES.join(", "));
 }
 
 const server = http.createServer((req, res) => {
@@ -461,7 +512,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === "GET" && (pathname === "/tonconnect-manifest.json" || pathname === "/api/tonconnect-manifest.json")) {
+  if (req.method === "GET" && (pathname === "/tonconnect-manifest.json" || API_PREFIXES.some(prefix => pathname === `${prefix}/tonconnect-manifest.json`))) {
     const base = getPublicBaseUrl();
     const fallback = {
       url: base + "/",
@@ -480,7 +531,11 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(manifest));
     return;
   }
-  if (pathname.startsWith("/api/")) {
+  if (req.method === "GET" && (pathname === "/health" || API_PREFIXES.some(prefix => pathname === `${prefix}/health`))) {
+    writeJson(res, 200, { ok: true, uptime: Math.round(process.uptime()) });
+    return;
+  }
+  if (API_PREFIXES.some(prefix => pathname.startsWith(prefix + "/"))) {
     writeJson(res, 404, { ok: false, error: "not_found", path: pathname });
     return;
   }
@@ -615,6 +670,18 @@ async function tgApi(method, payload) {
   return r.json();
 }
 
+async function tgResolveUserIdByUsername(username) {
+  const uname = String(username || "").replace(/^@/, "").trim().toLowerCase();
+  if (!uname) return null;
+  try {
+    const j = await tgApi("getChat", { chat_id: "@" + uname });
+    if (!j?.ok || !j?.result?.id) return null;
+    return String(j.result.id);
+  } catch {
+    return null;
+  }
+}
+
 function parseStarsPayload(s) {
   const m = String(s || "").match(/^topup_stars:([^:]+):(\d+):(.+)$/);
   if (!m) return null;
@@ -629,9 +696,9 @@ function isAdminTelegramId(id) {
 
 function parseBalanceCommand(text) {
   const t = String(text || "").trim();
-  let m = t.match(/^\/balance\s+@([a-zA-Z0-9_]{3,64})\s+([0-9]+(?:\.[0-9]{1,2})?)\s+(TON|STARS)$/i);
+  let m = t.match(/^\/balance\s+@([a-zA-Z0-9_]{3,64})\s+([0-9]+)\s+(TON|STARS)$/i);
   if (m) return { by: "username", username: m[1].toLowerCase(), amount: Number(m[2]), currency: m[3].toLowerCase() === "ton" ? "ton" : "stars" };
-  m = t.match(/^\/balance\s+([0-9]{4,20})\s+([0-9]+(?:\.[0-9]{1,2})?)\s+(TON|STARS)$/i);
+  m = t.match(/^\/balance\s+([0-9]{4,20})\s+([0-9]+)\s+(TON|STARS)$/i);
   if (m) return { by: "id", userId: String(m[1]), amount: Number(m[2]), currency: m[3].toLowerCase() === "ton" ? "ton" : "stars" };
   return null;
 }
@@ -641,21 +708,46 @@ async function processTgUpdate(u) {
     const msgText = u.message?.text || "";
     const fromId = u.message?.from?.id;
     const cmd = parseBalanceCommand(msgText);
+
+    if (String(msgText || "").trim().startsWith('/balance')) {
+      console.info("[bot][balance] incoming", {
+        text: String(msgText || "").slice(0, 120),
+        fromId: String(fromId || ""),
+        chatId: String(u.message?.chat?.id || ""),
+        parsed: !!cmd,
+        isAdmin: isAdminTelegramId(fromId)
+      });
+    }
+
     if (cmd) {
       if (!isAdminTelegramId(fromId)) {
+        console.warn("[bot][balance] forbidden", { fromId: String(fromId || "") });
         if (u.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Нет прав для команды /balance" });
       } else {
         let userId = "";
-        if (cmd.by === "id") userId = cmd.userId;
-        else {
+        if (cmd.by === "id") {
+          userId = cmd.userId;
+        } else {
           const matched = Object.keys(balanceStore.users).filter(uid => String(balanceStore.users[uid]?.username || "") === cmd.username);
-          if (matched.length !== 1) {
-            if (u.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Пользователь не найден" });
-            userId = "";
-          } else userId = matched[0];
+          if (matched.length === 1) {
+            userId = matched[0];
+          } else {
+            userId = await tgResolveUserIdByUsername(cmd.username) || "";
+            if (userId) {
+              const row = ensureUserBalance(userId);
+              row.username = cmd.username;
+              saveStoreAtomic(balanceStore);
+              console.info("[bot][balance] resolved via getChat", { username: cmd.username, userId });
+            }
+          }
         }
-        if (userId) {
+
+        if (!userId) {
+          console.warn("[bot][balance] user_not_found", { by: cmd.by, username: cmd.username || null, userId: cmd.userId || null });
+          if (u.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Пользователь не найден" });
+        } else {
           ensureUserBalance(userId).balances[cmd.currency] = roundMoney(ensureUserBalance(userId).balances[cmd.currency] + cmd.amount);
+          if (cmd.by === "username") ensureUserBalance(userId).username = cmd.username;
           saveStoreAtomic(balanceStore);
           pushBalanceToUser(userId);
           if (u.message?.chat?.id) {
@@ -680,7 +772,9 @@ async function processTgUpdate(u) {
     ensureUserBalance(parsed.userId).balances.stars = roundMoney(ensureUserBalance(parsed.userId).balances.stars + parsed.stars);
     saveStoreAtomic(balanceStore);
     pushBalanceToUser(parsed.userId);
-  } catch {}
+  } catch (e) {
+    console.warn("[bot] process update error", e?.message || e);
+  }
 }
 
 async function pollTelegramUpdates() {

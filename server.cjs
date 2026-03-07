@@ -142,6 +142,23 @@ const PAYMENT_ROUTES = new Set([
   "/pay/ton/wallet-balance"
 ]);
 
+function parseApiPrefixes() {
+  const raw = String(process.env.API_PREFIX || "/api").trim();
+  if (!raw) return ["/api"];
+  const out = raw
+    .split(",")
+    .map(v => String(v || "").trim())
+    .filter(Boolean)
+    .map(v => {
+      const n = v.startsWith("/") ? v : `/${v}`;
+      return n.replace(/\/+$/, "") || "/";
+    });
+  if (!out.includes("/api")) out.push("/api");
+  return Array.from(new Set(out));
+}
+
+const API_PREFIXES = parseApiPrefixes();
+
 function getRequestPath(reqUrl) {
   try {
     const u = new URL(reqUrl || "/", "http://localhost");
@@ -153,8 +170,15 @@ function getRequestPath(reqUrl) {
 }
 
 function toApiPath(pathname) {
-  if (pathname === "/api") return "/";
-  return pathname.startsWith("/api/") ? pathname.slice(4) : pathname;
+  const clean = String(pathname || "/").replace(/\/+$/, "") || "/";
+  for (const prefix of API_PREFIXES) {
+    if (clean === prefix) return "/";
+    if (clean.startsWith(prefix + "/")) {
+      const v = clean.slice(prefix.length);
+      return v.startsWith("/") ? v : `/${v}`;
+    }
+  }
+  return clean;
 }
 
 function writeJson(res, code, data, extraHeaders = {}) {
@@ -168,7 +192,10 @@ function logEnvWarnings() {
   if (!process.env.TON_RECEIVER) missing.push("TON_RECEIVER");
   if (!process.env.TONCENTER_API_KEY) missing.push("TONCENTER_API_KEY");
   if (!process.env.ADMIN_SECRET) missing.push("ADMIN_SECRET");
-  if (missing.length) console.warn("[env] missing:", missing.join(", "));
+  if (!process.env.ADMIN_IDS) missing.push("ADMIN_IDS");
+  if (!String(process.env.PUBLIC_BASE_URL || "").trim()) missing.push("PUBLIC_BASE_URL");
+  if (missing.length) console.warn("[env] critical env missing:", missing.join(", "));
+  console.info("[env] api prefixes:", API_PREFIXES.join(", "));
 }
 
 const server = http.createServer((req, res) => {
@@ -480,7 +507,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(manifest));
     return;
   }
-  if (pathname.startsWith("/api/")) {
+  if (API_PREFIXES.some(prefix => pathname.startsWith(prefix + "/"))) {
     writeJson(res, 404, { ok: false, error: "not_found", path: pathname });
     return;
   }
@@ -629,9 +656,9 @@ function isAdminTelegramId(id) {
 
 function parseBalanceCommand(text) {
   const t = String(text || "").trim();
-  let m = t.match(/^\/balance\s+@([a-zA-Z0-9_]{3,64})\s+([0-9]+(?:\.[0-9]{1,2})?)\s+(TON|STARS)$/i);
+  let m = t.match(/^\/balance\s+@([a-zA-Z0-9_]{3,64})\s+([0-9]+)\s+(TON|STARS)$/i);
   if (m) return { by: "username", username: m[1].toLowerCase(), amount: Number(m[2]), currency: m[3].toLowerCase() === "ton" ? "ton" : "stars" };
-  m = t.match(/^\/balance\s+([0-9]{4,20})\s+([0-9]+(?:\.[0-9]{1,2})?)\s+(TON|STARS)$/i);
+  m = t.match(/^\/balance\s+([0-9]{4,20})\s+([0-9]+)\s+(TON|STARS)$/i);
   if (m) return { by: "id", userId: String(m[1]), amount: Number(m[2]), currency: m[3].toLowerCase() === "ton" ? "ton" : "stars" };
   return null;
 }

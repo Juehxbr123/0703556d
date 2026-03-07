@@ -3,30 +3,6 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-function loadEnvFile() {
-  const envPath = path.join(__dirname, ".env");
-  if (!fs.existsSync(envPath)) return;
-  try {
-    const raw = fs.readFileSync(envPath, "utf8");
-    for (const line of raw.split(/\r?\n/)) {
-      const row = String(line || "").trim();
-      if (!row || row.startsWith("#")) continue;
-      const m = row.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-      if (!m) continue;
-      const key = m[1];
-      let val = m[2] || "";
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1);
-      }
-      if (!(key in process.env)) process.env[key] = val;
-    }
-  } catch (e) {
-    console.warn("[env] failed to read .env:", e?.message || e);
-  }
-}
-
-loadEnvFile();
-
 const PORT = Number(process.env.PORT || 3000);
 const TURN_MS = 30000;
 const REJOIN_GRACE_MS = 30000;
@@ -512,7 +488,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === "GET" && (pathname === "/tonconnect-manifest.json" || API_PREFIXES.some(prefix => pathname === `${prefix}/tonconnect-manifest.json`))) {
+  if (req.method === "GET" && (pathname === "/tonconnect-manifest.json" || pathname === "/api/tonconnect-manifest.json")) {
     const base = getPublicBaseUrl();
     const fallback = {
       url: base + "/",
@@ -666,18 +642,6 @@ async function tgApi(method, payload) {
   return r.json();
 }
 
-async function tgResolveUserIdByUsername(username) {
-  const uname = String(username || "").replace(/^@/, "").trim().toLowerCase();
-  if (!uname) return null;
-  try {
-    const j = await tgApi("getChat", { chat_id: "@" + uname });
-    if (!j?.ok || !j?.result?.id) return null;
-    return String(j.result.id);
-  } catch {
-    return null;
-  }
-}
-
 function parseStarsPayload(s) {
   const m = String(s || "").match(/^topup_stars:([^:]+):(\d+):(.+)$/);
   if (!m) return null;
@@ -704,46 +668,21 @@ async function processTgUpdate(u) {
     const msgText = u.message?.text || "";
     const fromId = u.message?.from?.id;
     const cmd = parseBalanceCommand(msgText);
-
-    if (String(msgText || "").trim().startsWith('/balance')) {
-      console.info("[bot][balance] incoming", {
-        text: String(msgText || "").slice(0, 120),
-        fromId: String(fromId || ""),
-        chatId: String(u.message?.chat?.id || ""),
-        parsed: !!cmd,
-        isAdmin: isAdminTelegramId(fromId)
-      });
-    }
-
     if (cmd) {
       if (!isAdminTelegramId(fromId)) {
-        console.warn("[bot][balance] forbidden", { fromId: String(fromId || "") });
         if (u.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Нет прав для команды /balance" });
       } else {
         let userId = "";
-        if (cmd.by === "id") {
-          userId = cmd.userId;
-        } else {
+        if (cmd.by === "id") userId = cmd.userId;
+        else {
           const matched = Object.keys(balanceStore.users).filter(uid => String(balanceStore.users[uid]?.username || "") === cmd.username);
-          if (matched.length === 1) {
-            userId = matched[0];
-          } else {
-            userId = await tgResolveUserIdByUsername(cmd.username) || "";
-            if (userId) {
-              const row = ensureUserBalance(userId);
-              row.username = cmd.username;
-              saveStoreAtomic(balanceStore);
-              console.info("[bot][balance] resolved via getChat", { username: cmd.username, userId });
-            }
-          }
+          if (matched.length !== 1) {
+            if (u.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Пользователь не найден" });
+            userId = "";
+          } else userId = matched[0];
         }
-
-        if (!userId) {
-          console.warn("[bot][balance] user_not_found", { by: cmd.by, username: cmd.username || null, userId: cmd.userId || null });
-          if (u.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Пользователь не найден" });
-        } else {
+        if (userId) {
           ensureUserBalance(userId).balances[cmd.currency] = roundMoney(ensureUserBalance(userId).balances[cmd.currency] + cmd.amount);
-          if (cmd.by === "username") ensureUserBalance(userId).username = cmd.username;
           saveStoreAtomic(balanceStore);
           pushBalanceToUser(userId);
           if (u.message?.chat?.id) {
@@ -768,9 +707,7 @@ async function processTgUpdate(u) {
     ensureUserBalance(parsed.userId).balances.stars = roundMoney(ensureUserBalance(parsed.userId).balances.stars + parsed.stars);
     saveStoreAtomic(balanceStore);
     pushBalanceToUser(parsed.userId);
-  } catch (e) {
-    console.warn("[bot] process update error", e?.message || e);
-  }
+  } catch {}
 }
 
 async function pollTelegramUpdates() {

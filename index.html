@@ -1,0 +1,3157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <title>Durak Mini App</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://unpkg.com/@tonconnect/ui@2.0.9/dist/tonconnect-ui.min.js"></script>
+  <script src="https://unpkg.com/tonweb@0.0.66/dist/tonweb.js"></script>
+
+  <style>
+    :root{
+      --bg:#050b17;
+      --felt:#0b1d35;
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+
+      --safe-t: env(safe-area-inset-top);
+      --safe-b: env(safe-area-inset-bottom);
+      --safe-l: env(safe-area-inset-left);
+      --safe-r: env(safe-area-inset-right);
+
+      --deckW: 74px;
+      --deckH: 114px;
+      --cardW: 88px;
+      --cardH: 136px;
+      --cardRank: 22px;
+      --cardSuit: 20px;
+
+      --tabH: 64px;
+    }
+
+    html,body{height:100%; overflow:hidden; background:var(--bg); overscroll-behavior: none;}
+    body{
+      margin:0;
+      background: radial-gradient(120% 120% at 50% 0%, #0d3f59, var(--felt) 48%, var(--bg));
+      color:#f8fafc;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Arial;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-user-select:none; user-select:none;
+      overscroll-behavior: none;
+      touch-action: none; /* базово режем жесты страницы */
+    }
+
+    /* Browser-only overlay */
+    .blockOverlay{
+      position:fixed; inset:0;
+      display:none;
+      background: rgba(0,0,0,.72);
+      z-index: 99999;
+      place-items:center;
+      padding: 18px;
+      padding-top: calc(18px + var(--safe-t));
+      padding-bottom: calc(18px + var(--safe-b));
+      padding-left: calc(18px + var(--safe-l));
+      padding-right: calc(18px + var(--safe-r));
+      text-align:center;
+    }
+    .blockCard{
+      width:min(520px,92vw);
+      background: rgba(19,31,27,.96);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    }
+    .blockCard h2{margin:0 0 10px;}
+    .blockCard a{
+      display:inline-block;
+      margin-top: 12px;
+      text-decoration:none;
+      border-radius: 999px;
+      padding: 12px 14px;
+      font-weight: 1000;
+      background: linear-gradient(180deg,#38bdf8,#0284c7);
+      color: #02131b;
+    }
+
+    .app{
+      position:fixed; inset:0;
+      padding-top: var(--safe-t);
+      padding-left: var(--safe-l);
+      padding-right: var(--safe-r);
+      padding-bottom: calc(var(--safe-b) + var(--tabH));
+      box-sizing:border-box;
+    }
+
+    .screen{
+      position:absolute;
+      inset: 0;
+      padding: calc(26px + 46px) 12px 12px;
+      overflow:hidden;
+      box-sizing:border-box;
+      display:none;
+    }
+    .screen.active{display:block;}
+
+    /* Bottom Tabs */
+    .tabs{
+      position:fixed;
+      left: var(--safe-l);
+      right: var(--safe-r);
+      bottom: var(--safe-b);
+      height: var(--tabH);
+      display:flex;
+      gap: 8px;
+      align-items:center;
+      justify-content:space-between;
+      padding: 8px 10px;
+      box-sizing:border-box;
+      background: rgba(0,0,0,.28);
+      border-top: 1px solid rgba(255,255,255,.12);
+      backdrop-filter: blur(10px);
+      z-index: 200;
+    }
+    .tabBtn{
+      flex:1;
+      min-width: 0;
+      border:none;
+      border-radius: 14px;
+      padding: 10px 8px;
+      font-weight: 1000;
+      font-size: 12px;
+      background: rgba(255,255,255,.10);
+      color:#fff;
+      cursor:pointer;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      touch-action: manipulation;
+    }
+    .tabBtn.active{
+      background: rgba(56,189,248,.92);
+      color:#02131b;
+    }
+    .tabs.hidden{display:none;}
+
+    /* Common UI */
+    .cardPanel{
+      background: linear-gradient(180deg, rgba(10,24,43,.72), rgba(6,16,29,.65));
+      border: 1px solid rgba(118,235,255,.22);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 14px;
+      margin-top: 20px;
+    }
+    .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+    .col{display:flex; flex-direction:column; gap:10px;}
+    .title{font-weight:1000; font-size: 18px;}
+    .muted{opacity:.85; font-size: 13px; line-height: 1.3;}
+    .walletLink{cursor:pointer; text-decoration:underline; text-decoration-style:dotted;}
+    .btn{
+      border:none;
+      border-radius: 999px;
+      padding: 12px 14px;
+      font-weight:1000;
+      font-size: 15px;
+      cursor:pointer;
+      touch-action: manipulation;
+    }
+    .modeBtn{
+      width: 100%;
+      height: 88px;
+      border-radius: 7px;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap: 6px;
+      padding: 8px 10px;
+      text-align:center;
+      line-height:1;
+    }
+    .modeIcon{
+      width: 36px;
+      height: 36px;
+      stroke: #0b1220;
+      stroke-width: 2;
+      fill: none;
+    }
+    .modeIconMini{
+      width: 18px;
+      height: 18px;
+      stroke: #fff;
+      stroke-width: 2;
+      fill: none;
+    }
+    .modeIcons{
+      display:flex;
+      gap: 6px;
+      align-items:center;
+    }
+    .modePill{
+      padding: 6px 8px;
+    }
+    .modeLabel{
+      font-size: 13px;
+      font-weight: 900;
+      color:#0b1220;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+    .modeRow{
+      display:grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 12px;
+      align-items:stretch;
+    }
+    .btn.blue{background: linear-gradient(180deg,#59e3ff,#0ea5e9); color:#031424; box-shadow:0 0 16px rgba(56,189,248,.35);}
+    .btn.green{background: linear-gradient(180deg,#34d399,#059669); color:#06120c;}
+    .btn.orange{background: linear-gradient(180deg,#fbbf24,#b45309); color:#1a1200;}
+    .btn.gray{background: linear-gradient(180deg,#94a3b8,#64748b); color:#0b1220;}
+    .btn.red{background: linear-gradient(180deg,#fb7185,#be123c); color:#1f0b12;}
+    .btn:disabled{opacity:.6; cursor:not-allowed;}
+    .iconBtn{
+      min-width: 40px;
+      width: 40px;
+      height: 40px;
+      padding: 6px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size: 18px;
+    }
+    .flagBtn{
+      background: rgba(0,0,0,.5);
+      color:#fff;
+      border: 1px solid rgba(255,255,255,.2);
+    }
+
+    .input{
+      width: 100%;
+      box-sizing:border-box;
+      border:none;
+      border-radius: 999px;
+      padding: 12px 14px;
+      font-size: 16px; /* iOS zoom fix */
+      outline:none;
+      touch-action: manipulation;
+    }
+    .stakeSlider{ width:100%; accent-color:#38bdf8; touch-action:auto; }
+    .profileTop{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .balanceChip{ padding:4px 10px; border-radius:999px; background:rgba(255,255,255,.12); font-size:12px; font-weight:900; white-space:nowrap; width:fit-content; margin-left:auto; }
+    .balanceChip.clickable{ cursor:pointer; }
+    .filtersGrid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .topupPanel{ margin-top:10px; padding:12px; border-radius:16px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); }
+    .topupRow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .topupTag{ font-size:11px; font-weight:900; letter-spacing:.5px; text-transform:uppercase; color:#7dd3fc; opacity:.95; }
+    .btn.neon{background: linear-gradient(180deg,#59e3ff,#0ea5e9); color:#031424; box-shadow:0 0 16px rgba(56,189,248,.35);}
+    .btn.neon:active{ opacity:.95; }
+
+    .switch{
+      display:flex; align-items:center; gap:10px;
+      font-weight: 900;
+    }
+    .check{
+      width: 22px; height: 22px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.10);
+      border: 1px solid rgba(255,255,255,.16);
+      display:grid; place-items:center;
+      cursor:pointer;
+      user-select:none;
+      touch-action: manipulation;
+    }
+    .check::after{
+      content:"";
+      font-weight: 1000;
+      font-size: 14px;
+      line-height: 1;
+    }
+    .check.on{
+      background: rgba(34,197,94,.92);
+      color:#06120c;
+      border-color: rgba(34,197,94,.92);
+    }
+    .check.on::after{ content:"✓"; }
+
+    .list{
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+      overflow:auto;
+      max-height: calc(100vh - var(--safe-t) - var(--safe-b) - var(--tabH) - 30px);
+      padding-right: 4px;
+      overscroll-behavior: contain; /* IMPORTANT */
+      touch-action: pan-y;
+    }
+    .listItem{
+      display:flex;
+      flex-direction:column;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(255,255,255,.12);
+    }
+    .listTop{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap: 10px;
+    }
+    .pill{
+      font-weight:1000;
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.10);
+      border: 1px solid rgba(255,255,255,.12);
+      white-space:nowrap;
+    }
+    .playersLine{
+      font-weight: 900;
+      font-size: 13px;
+      opacity: .95;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .err{
+      color:#fca5a5;
+      font-weight: 1000;
+      min-height: 18px;
+    }
+
+    /* ===== GAME UI ===== */
+    .gameWrap{
+      position:fixed; inset:0;
+      display:none;
+      z-index: 5000;
+      padding:
+        calc(12px + var(--safe-t))
+        calc(12px + var(--safe-r))
+        calc(10px + var(--safe-b))
+        calc(12px + var(--safe-l));
+      box-sizing:border-box;
+    }
+    .gameWrap.active{display:block;}
+
+    .tableWrap{
+      width:100%;
+      height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding-top: 88px;
+      box-sizing:border-box;
+    }
+    .table{
+      width:min(840px, 92vw);
+      height:min(460px, 50vh);
+      background: rgba(17,88,66,.92);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(255,255,255,.12);
+      position:relative;
+      overflow:hidden;
+      touch-action:none;
+    }
+
+    /* Opponents top (outside table) */
+    .enemyArea{
+      position: fixed;
+      top: calc(8px + var(--safe-t) + 46px);
+      left: calc(10px + var(--safe-l));
+      right: calc(10px + var(--safe-r));
+      z-index: 5400;
+      display:flex;
+      justify-content:center;
+      pointer-events:none;
+    }
+    .enemyRow{
+      width: min(720px, 96vw);
+      display:grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-auto-rows: minmax(36px, auto);
+      justify-items:center;
+      gap: 8px 10px;
+      padding: 6px 8px;
+      pointer-events:none;
+    }
+    .enemy{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 16px;
+      background: rgba(0,0,0,.25);
+      border: 1px solid rgba(255,255,255,.12);
+      max-width: 220px;
+      min-width: 0;
+      pointer-events:none;
+    }
+	.enemy.me{ pointer-events:auto; }
+    .enemy.me .avatarInner{ pointer-events:auto; cursor:pointer; }
+    .enemy .avatarWrap{
+      width: 30px; height: 30px;
+      position: relative;
+      display:grid;
+      place-items:center;
+    }
+    .enemy .avatarInner{
+      width: 30px; height: 30px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.14);
+      display:grid; place-items:center;
+      font-weight:1000;
+      overflow:hidden;
+      position: relative;
+      z-index: 2;
+    }
+    /* Timer ring around avatar (blue, 30s) */
+    .enemy .avatarWrap .timerRing{
+      position:absolute;
+      inset:-7px;
+      width: calc(100% + 14px);
+      height: calc(100% + 14px);
+      pointer-events:none;
+      transform: rotate(-90deg);
+      z-index: 1;
+    }
+    .enemy .avatarWrap .timerRing circle{
+      fill: none;
+      stroke: #35b6ff;
+      stroke-width: 3.5;
+      stroke-linecap: round;
+      opacity: 0;
+      transition: opacity .2s ease;
+    }
+    .enemy .avatarWrap .timerRing.active circle{ opacity: .95; }
+
+    /* Emoji FX on avatar (3s, scale up + fade out) */
+    .avatarEmojiFx{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform: translate(-50%,-50%) scale(0);
+      font-size: 50px;
+      line-height: 1;
+      opacity: 0;
+      pointer-events:none;
+      animation: avatarEmojiPop 3s ease-out forwards;
+      filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
+      z-index: 3;
+    }
+    .avatarEmojiFloat{
+      position:absolute;
+      left:50%;
+      top:-10px;
+      transform: translate(-50%,-50%) scale(0);
+      font-size: 50px;
+      line-height: 1;
+      opacity: 0;
+      pointer-events:none;
+      animation: avatarEmojiPop 3s ease-out forwards;
+      filter: drop-shadow(0 6px 10px rgba(0,0,0,.35));
+      z-index: 3;
+    }
+    @keyframes avatarEmojiPop{
+      0%   { transform: translate(-50%,-50%) scale(0);   opacity:0; }
+      12%  { transform: translate(-50%,-50%) scale(1); opacity:1; }
+      70%  { transform: translate(-50%,-50%) scale(1); opacity:1; }
+      100% { transform: translate(-50%,-50%) scale(1); opacity:0; }
+    }
+
+    .avatarBadge{
+      position:absolute;
+      left:50%;
+      top:-10px;
+      transform: translateX(-50%);
+      font-size: 20px;
+      line-height: 1;
+      pointer-events:none;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,.35));
+      z-index: 4;
+    }
+
+    .enemy .avatarInner img{width:100%; height:100%; object-fit:cover;}
+    .enemy .name{
+      font-weight: 1000;
+      font-size: 12px;
+      opacity: .95;
+      white-space: normal;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      max-width: 200px;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      line-height: 1.1;
+    }
+    .enemy .cards{
+      display:flex;
+      align-items:center;
+      gap: 0;
+      margin-left: 12px;
+      max-width: 120px;
+      flex-shrink: 0;
+    }
+    .enemy .cardBack{
+      width: 18px;
+      height: 26px;
+      border-radius: 6px;
+      background: linear-gradient(180deg, rgba(2,132,199,.9), rgba(30,64,175,.85));
+      border: 1px solid rgba(255,255,255,.25);
+      box-shadow: 0 4px 10px rgba(0,0,0,.35);
+      margin-left: -12px;
+      transform-origin: bottom center;
+    }
+
+    /* Slots */
+    .pairs{
+      position:absolute;
+      inset: 0;
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(2, 1fr);
+      gap: 16px;
+      padding: 18px;
+      box-sizing:border-box;
+      z-index: 5;
+    }
+    .pair{
+      position:relative;
+      border-radius: 18px;
+      background: transparent;
+      border: none;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      transition: transform .12s ease, background .12s ease, border-color .12s ease;
+    }
+    .pair.drop-ok{
+      background: transparent;
+      outline: 2px dashed rgba(34,197,94,.55);
+      transform: scale(1.02);
+    }
+    .pair.drop-bad{
+      background: transparent;
+      outline: 2px dashed rgba(248,113,113,.55);
+    }
+    .pair.transfer-target{
+      outline: 2px dashed rgba(56,189,248,.6);
+      background: rgba(56,189,248,.1);
+    }
+
+    /* Transfer Zone */
+    .transferZone{
+      position:absolute;
+      left: 50%;
+      top: 58%;
+      transform: translate(-50%,-50%);
+      width: 86px;
+      height: 130px;
+      border-radius: 16px;
+      border: 2px dashed rgba(255,255,255,.30);
+      background: rgba(255,255,255,.10);
+      display:none;
+      z-index: 40;
+      align-items:center;
+      justify-content:center;
+    }
+    .transferZone.show{display:flex;}
+    .transferInner{
+      width: 70px;
+      height: 108px;
+      border-radius: 14px;
+      background: rgba(0,0,0,.18);
+      border: 1px solid rgba(255,255,255,.12);
+      position:relative;
+    }
+    .transferArrow{
+      position:absolute;
+      inset:-18px;
+      border-radius: 20px;
+      border: 2px solid rgba(56,189,248,.55);
+      opacity:.55;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse{
+      0%,100%{transform: scale(1); opacity:.50;}
+      50%{transform: scale(1.05); opacity:.80;}
+    }
+
+    .transferZone.drop-ok{
+      border-color: rgba(34,197,94,.65);
+      background: rgba(34,197,94,.14);
+    }
+    .transferZone.drop-bad{
+      border-color: rgba(248,113,113,.65);
+      background: rgba(248,113,113,.14);
+    }
+
+    /* Cards */
+    .card{
+      width: var(--cardW);
+      height: var(--cardH);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(255,255,255,.86));
+      color:#0b1220;
+      position: relative;
+      box-shadow: 0 10px 25px rgba(0,0,0,.35);
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      padding: 10px;
+      box-sizing:border-box;
+      user-select:none;
+      touch-action:none;
+      transition: transform .12s ease;
+      cursor: pointer; /* как кнопка */
+    }
+    .card .corner{
+      display:flex;
+      flex-direction:column;
+      align-items:flex-start;
+      gap: 4px;
+      line-height: 1;
+    }
+    .card .corner.bottom{
+      position:absolute;
+      right: 10px;
+      bottom: 10px;
+      align-items:flex-end;
+      transform: rotate(180deg);
+    }
+    .card .r{font-weight:1000; font-size: var(--cardRank); line-height:1;}
+    .card .s{font-weight:1000; font-size: var(--cardSuit); line-height:1;}
+    .card .big{
+      position:absolute; inset:0;
+      display:grid; place-items:center;
+      font-weight:1000;
+      font-size: 38px;
+      opacity: .28;
+      pointer-events:none;
+    }
+    .red{ color:#b91c1c; }
+    .black{ color:#111827; }
+
+    .card.playable{ outline: 2px solid rgba(34,197,94,.55); }
+    .card.lift{ transform: translateY(-18px) scale(1.02); z-index: 999; }
+    .card.deal-in{ animation: dealIn .75s ease-out; }
+
+    @keyframes dealIn{
+      0%{ transform: translate(-220px, 90px) scale(.85); opacity: 0; }
+      100%{ transform: translate(0,0) scale(1); opacity: 1; }
+    }
+
+    .discardGhost{
+      position: fixed;
+      z-index: 99999;
+      pointer-events:none;
+      animation: discardSlide .75s ease-in-out forwards;
+    }
+    @keyframes discardSlide{
+      0%{ transform: translate(0,0) scale(1); opacity: 1; }
+      100%{ transform: translate(var(--dx, 160px), var(--dy, -80px)) scale(.6); opacity: 0; }
+    }
+
+    /* Deck outside table (left) */
+    .deckPanel{
+      position: fixed;
+      left: calc(10px + var(--safe-l));
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 5100;
+      display:flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      pointer-events:none;
+    }
+    .deckWrap{
+      width: var(--deckW);
+      height: calc(var(--deckH) + 18px);
+      position: relative;
+    }
+    .deckCard{
+      width: var(--deckW);
+      height: var(--deckH);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(2,132,199,.9), rgba(30,64,175,.85));
+      box-shadow: 0 10px 25px rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.14);
+    }
+    .trumpBadge{
+      position:absolute;
+      right: -6px;
+      bottom: 8px;
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.9);
+      display:grid;
+      place-items:center;
+      font-size: 18px;
+      font-weight: 1000;
+      box-shadow: 0 10px 25px rgba(0,0,0,.35);
+    }
+    .deckCount{
+      position:absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 18px;
+      font-weight: 1000;
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.12);
+      padding: 4px 10px;
+      border-radius: 999px;
+      color:#fff;
+    }
+
+    /* Discard pile (right) removed in UI */
+
+    /* Hand */
+    .handWrap{
+      position: fixed;
+      left: calc(10px + var(--safe-l));
+      right: calc(10px + var(--safe-r));
+      bottom: calc(10px + var(--safe-b));
+      z-index: 5200;
+      display:flex;
+      justify-content:center;
+      pointer-events:none;
+    }
+    .hand{
+      pointer-events:auto;
+      display:flex;
+      align-items:flex-end;
+      justify-content:center;
+      gap: 8px;
+      overflow-x:auto;
+      padding: 8px 10px;
+      max-width: 100%;
+      width: 100%;
+      box-sizing:border-box;
+      touch-action: pan-x;
+      overscroll-behavior: contain;
+      -ms-overflow-style:none;
+      scrollbar-width:none;
+    }
+    .hand::-webkit-scrollbar{display:none;}
+    .hand.fan{ justify-content:center; }
+    .hand.fan .card{ margin-left: -34px; }
+    .hand.fan .card:first-child{ margin-left: 0; }
+
+    /* Controls */
+    .controls{
+      position: fixed;
+      right: calc(10px + var(--safe-r));
+      bottom: calc(12px + var(--safe-b));
+      z-index: 5300;
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+      align-items:flex-end;
+      pointer-events:none;
+    }
+    .pillStatus{
+      pointer-events:none;
+      font-weight: 1000;
+      font-size: 13px;
+      background: rgba(0,0,0,.28);
+      border: 1px solid rgba(255,255,255,.12);
+      padding: 8px 12px;
+      border-radius: 999px;
+      backdrop-filter: blur(8px);
+      max-width: min(520px, 86vw);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+    }
+    .modeBadges{
+      pointer-events:none;
+      display:flex;
+      gap: 6px;
+      align-items:center;
+      padding: 6px 8px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.28);
+      border: 1px solid rgba(255,255,255,.12);
+      backdrop-filter: blur(8px);
+    }
+    .controls .btn{pointer-events:auto; min-width: 170px;}
+    .topCenterControls{
+      position: fixed;
+      top: calc(6px + var(--safe-t));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5400;
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+      pointer-events:none;
+    }
+    .topCenterControls .btn{pointer-events:auto;}
+
+    /* Result overlay */
+    .resultOverlay{
+      position:fixed; inset:0;
+      display:none !important;
+      background: rgba(0,0,0,.72);
+      z-index: 9999;
+      place-items:center;
+      padding: 18px;
+      padding-top: calc(18px + var(--safe-t));
+      padding-bottom: calc(18px + var(--safe-b));
+      padding-left: calc(18px + var(--safe-l));
+      padding-right: calc(18px + var(--safe-r));
+      text-align:center;
+      touch-action: none;
+    }
+    .resultOverlay.show{display:grid;}
+    .resultCard{
+      width:min(520px,92vw);
+      background: rgba(19,31,27,.96);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    }
+    .resultTitle{ font-weight: 1000; font-size: 22px; margin-bottom: 8px; }
+    .resultMsg{ opacity:.9; margin-bottom: 12px; }
+
+    .overlayModal{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(2,8,20,.56); backdrop-filter:blur(10px); z-index:1200; padding:16px;}
+    .modalCard{width:min(520px,92vw); border-radius:18px; border:1px solid rgba(110,231,255,.35); background:linear-gradient(180deg,rgba(9,26,41,.92),rgba(7,17,31,.9)); box-shadow:0 16px 45px rgba(0,185,255,.25); padding:16px;}
+    .toastStack{position:fixed; top:calc(var(--safe-t) + 10px); right:12px; display:flex; flex-direction:column; gap:8px; z-index:1300;}
+    .toast{padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.2); background:rgba(8,17,28,.93); color:#dff7ff; font-size:13px; box-shadow:0 10px 20px rgba(0,0,0,.35);}
+    .toast.success{border-color:rgba(52,211,153,.45);}
+    .toast.error{border-color:rgba(251,113,133,.45);}
+
+    /* Touch drag ghost */
+    .ghost{
+      position: fixed;
+      z-index: 99999;
+      pointer-events:none;
+      transform: translate(-50%,-50%);
+    }
+
+    @media (max-width: 520px){
+      :root{
+        --deckW: 66px;
+        --deckH: 102px;
+        --cardW: 74px;
+        --cardH: 112px;
+        --cardRank: 18px;
+        --cardSuit: 16px;
+      }
+      .hand.fan .card{ margin-left: -28px; }
+      .tabBtn{font-size:11px; padding: 10px 6px;}
+      .enemyRow{width: min(520px, 96vw);}
+      .modeBtn{height: 84px;}
+      .modeLabel{font-size: 12px;}
+      .table{height:min(420px, 46vh);}
+      .table{width:min(320px, 78vw);}
+      .deckPanel{
+        left: calc(-12px + var(--safe-l));
+      }
+      .filtersGrid{ grid-template-columns:1fr; }
+      .balanceChip{ font-size:11px; padding:3px 8px; }
+      .topupRow{flex-direction:column; align-items:stretch;}
+    }
+    @media (min-width: 900px){
+      :root{
+        --cardW: 96px;
+        --cardH: 148px;
+        --cardRank: 26px;
+      --cardSuit: 22px;
+    }
+    .card .big{ font-size: 46px; }
+    .controls .btn{min-width: 140px;}
+  }
+  </style>
+</head>
+
+<body>
+
+  <div class="blockOverlay" id="blockOverlay">
+    <div class="blockCard">
+      <h2>Открой в Telegram</h2>
+      <div>Это приложение работает только внутри Telegram Mini App.</div>
+      <a id="openBotLink" href="#" target="_blank" rel="noopener">ткрыть в Telegram</a>
+    </div>
+  </div>
+
+  <div class="app" id="app">
+
+    <!-- PROFILE -->
+    <div class="screen active" id="screenProfile">
+      <div class="cardPanel">
+        <div class="profileTop">
+          <div class="row" style="gap:12px;">
+            <div id="profAva" style="width:46px;height:46px;border-radius:999px;background:rgba(255,255,255,.14);display:grid;place-items:center;font-weight:1000;overflow:hidden;"></div>
+            <div class="col" style="gap:4px;">
+              <div class="title" id="profName">Player</div>
+              <div class="muted" id="profUser">@</div>
+            </div>
+          </div>
+          <div class="balanceChip" id="profileBalanceChip">TON: 0 • ⭐: 0</div>
+        </div>
+
+        <div class="muted" id="lastGameInfo" style="margin-top:8px;"></div>
+
+        <div style="height:12px;"></div>
+
+        <div class="row" style="justify-content:space-between; gap:10px; align-items:center;">
+          <div class="muted">Баланс: <b id="balanceVal">0</b></div>
+        </div>
+        <div class="muted" id="balanceBreakdown" style="margin-top:6px;">TON: 0 • STARS: 0</div>
+        <div class="row" style="margin-top:8px;">
+          <button class="btn gray" id="btnTopupTon">Connect TON Wallet</button>
+          <div class="muted" id="tonWalletInfo">Кошелёк не подключен</div>
+          <div class="muted" id="tonWalletBalanceInfo" style="font-size:12px;opacity:.8;">Баланс кошелька: —</div>
+        </div>
+        <div class="row" id="tonTopupControls" style="margin-top:8px; display:none;">
+          <input class="input" id="topupTonInput" type="number" min="0.1" step="0.1" value="0.1" style="max-width:120px;" />
+          <button class="btn blue" id="btnPayTon">Пополнить TON</button>
+        </div>
+        <div class="topupPanel">
+          <div class="topupTag">TELEGRAM STARS</div>
+          <div class="topupRow" style="margin-top:6px;">
+            <button class="btn neon" id="btnTopupStars">Пополнить ⭐</button>
+            <input class="input" id="topupStarsInput" type="number" min="1" step="1" value="1" style="max-width:120px;" />
+          </div>
+        </div>
+
+        <div style="height:10px;"></div>
+        <div class="row" style="justify-content:space-between; gap:12px;">
+          <div class="col" style="flex:1; min-width: 220px;">
+            <div class="muted">Быстрая игра</div>
+            <div class="row">
+              <button class="btn blue" id="btnQuick">Быстрая игра</button>
+              <button class="btn gray" id="btnQuickCancel" style="display:none;">Отменить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PUBLIC -->
+    <div class="screen" id="screenPublic">
+      <div class="cardPanel">
+        <div class="row" style="justify-content:space-between;">
+          <div class="title">Публичные лобби</div>
+          <button class="btn gray" id="btnRefreshPub">Обновить</button>
+          <div class="balanceChip tabBalance">TON: 0 • ⭐: 0</div>
+        </div>
+        <div style="height:10px;"></div>
+        <div class="filtersGrid">
+          <select class="input" id="filterCurrency"><option value="all">Валюта: Все</option><option value="ton">Валюта: TON</option><option value="stars">Валюта: ⭐</option></select>
+          <select class="input" id="filterTransfer"><option value="all">Переводной: Все</option><option value="on">Переводной: Вкл</option><option value="off">Переводной: Выкл</option></select>
+          <select class="input" id="filterThrow"><option value="all">Подкидывание: Все</option><option value="neighbors">Подкидывание: Соседи</option><option value="allOnly">Подкидывание: Все игроки</option></select>
+          <select class="input" id="filterWin"><option value="all">Режим победы: Все</option><option value="classic">Режим победы: Классика</option><option value="draw">Режим победы: Ничья</option></select>
+        </div>
+        <div class="list" id="listPublic"></div>
+        <div class="err" id="errPublic"></div>
+      </div>
+    </div>
+
+    <!-- PRIVATE -->
+    <div class="screen" id="screenPrivate">
+      <div class="cardPanel">
+        <div class="row" style="justify-content:space-between;">
+          <div class="title">Закрытые лобби</div>
+          <button class="btn gray" id="btnRefreshPriv">Обновить</button>
+          <div class="balanceChip tabBalance">TON: 0 • ⭐: 0</div>
+        </div>
+        <div style="height:10px;"></div>
+        <div class="filtersGrid">
+          <select class="input" id="filterCurrencyPriv"><option value="all">Валюта: Все</option><option value="ton">Валюта: TON</option><option value="stars">Валюта: ⭐</option></select>
+          <select class="input" id="filterTransferPriv"><option value="all">Переводной: Все</option><option value="on">Переводной: Вкл</option><option value="off">Переводной: Выкл</option></select>
+          <select class="input" id="filterThrowPriv"><option value="all">Подкидывание: Все</option><option value="neighbors">Подкидывание: Соседи</option><option value="allOnly">Подкидывание: Все игроки</option></select>
+          <select class="input" id="filterWinPriv"><option value="all">Режим победы: Все</option><option value="classic">Режим победы: Классика</option><option value="draw">Режим победы: Ничья</option></select>
+        </div>
+        <div class="list" id="listPrivate"></div>
+        <div class="err" id="errPrivate"></div>
+      </div>
+    </div>
+
+    <!-- CREATE -->
+    <div class="screen" id="screenCreate">
+      <div class="cardPanel">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <div class="title">Создать лобби</div>
+          <div class="balanceChip tabBalance">TON: 0 • ⭐: 0</div>
+        </div>
+        <div style="height:10px;"></div>
+
+        <div class="row" style="align-items:center; gap:10px;">
+          <div class="muted">Валюта ставки:</div>
+          <button class="btn gray" id="btnCurTon">TON</button>
+          <button class="btn gray" id="btnCurStars">⭐</button>
+        </div>
+        <div class="row" style="align-items:center; gap:10px; margin-top:8px;"><div class="muted" id="stakeLabel">Ставка: 1 TON</div></div>
+        <div class="row" style="margin-top:8px;"><input class="stakeSlider" id="stakeInput" type="range" min="1" max="100" step="1" value="1" /></div>
+
+        <div style="height:12px;"></div>
+
+        <div class="row">
+          <div class="col" style="flex:1; min-width:220px;">
+            <div class="muted">Количество игроков</div>
+            <div class="row">
+              <button class="btn gray" id="btnP2">2</button>
+              <button class="btn gray" id="btnP3">3</button>
+              <button class="btn gray" id="btnP4">4</button>
+              <button class="btn gray" id="btnP5">5</button>
+              <button class="btn gray" id="btnP6">6</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:10px;"></div>
+
+        <div class="modeRow">
+          <button class="btn gray modeBtn" id="btnTransferOff" aria-label="Подкидной">
+            <svg class="modeIcon" viewBox="0 0 48 48" aria-hidden="true">
+              <rect x="10" y="12" width="18" height="24" rx="3" />
+              <path d="M30 24h10" />
+              <path d="M36 20l4 4-4 4" />
+            </svg>
+            <span class="modeLabel">Подкидной</span>
+          </button>
+          <button class="btn gray modeBtn" id="btnTransferOn" aria-label="Переводной">
+            <svg class="modeIcon" viewBox="0 0 48 48" aria-hidden="true">
+              <rect x="10" y="12" width="18" height="24" rx="3" />
+              <path d="M24 21a5 5 0 1 1-3-3" />
+              <path d="M23 16h5v5" />
+            </svg>
+            <span class="modeLabel">Переводной</span>
+          </button>
+          <button class="btn gray modeBtn" id="btnThrowAll" aria-label="От всех">
+            <svg class="modeIcon" viewBox="0 0 48 48" aria-hidden="true">
+              <rect x="14" y="16" width="20" height="16" rx="3" />
+              <path d="M8 12l6 6" />
+              <path d="M40 12l-6 6" />
+              <path d="M24 6v10" />
+            </svg>
+            <span class="modeLabel">От всех</span>
+          </button>
+          <button class="btn gray modeBtn" id="btnThrowNeighbors" aria-label="От соседей">
+            <svg class="modeIcon" viewBox="0 0 48 48" aria-hidden="true">
+              <rect x="14" y="16" width="20" height="16" rx="3" />
+              <path d="M8 20l6 4" />
+              <path d="M40 20l-6 4" />
+            </svg>
+            <span class="modeLabel">От соседей</span>
+          </button>
+          <button class="btn gray modeBtn" id="btnModeClassic" aria-label="Классика">
+            <svg class="modeIcon" viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M6 30c6-10 12-14 18-14s12 4 18 14" />
+              <path d="M8 32h32" />
+              <circle cx="24" cy="12" r="3" />
+            </svg>
+            <span class="modeLabel">Классика</span>
+          </button>
+          <button class="btn gray modeBtn" id="btnModeDraw" aria-label="Ничья">
+            <svg class="modeIcon" viewBox="0 0 48 48" aria-hidden="true">
+              <rect x="12" y="10" width="24" height="28" rx="4" />
+              <line x1="12" y1="24" x2="36" y2="24" />
+              <circle cx="24" cy="16" r="2" />
+              <circle cx="24" cy="32" r="2" />
+            </svg>
+            <span class="modeLabel">Ничья</span>
+          </button>
+        </div>
+
+        <div style="height:10px;"></div>
+        <label class="switch"><input type="checkbox" id="privateCheck" /> Приватное лобби</label>
+        <div id="passWrap" style="margin-top:10px; display:none;">
+          <input class="input" id="passInput" placeholder="Пароль" inputmode="text" autocomplete="off" autocapitalize="off" />
+        </div>
+
+        <div style="height:12px;"></div>
+
+        <div class="row">
+          <button class="btn green" id="btnCreateLobby">Создать TON</button>
+        </div>
+
+        <div class="err" id="errCreate"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs" id="tabs">
+    <button class="tabBtn active" id="tabProfile">Профиль</button>
+    <button class="tabBtn" id="tabPublic">Публичные</button>
+    <button class="tabBtn" id="tabPrivate">Закрытые</button>
+    <button class="tabBtn" id="tabCreate">Создать</button>
+  </div>
+
+  <!-- GAME -->
+  <div class="gameWrap" id="gameWrap">
+    <div class="enemyArea">
+      <div class="enemyRow" id="enemyRow"></div>
+    </div>
+    <div class="tableWrap">
+      <div class="table" id="table">
+        <div class="pairs" id="pairs"></div>
+
+        <div class="transferZone" id="transferZone">
+          <div class="transferInner">
+            <div class="transferArrow"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="deckPanel">
+      <div class="deckWrap">
+        <div class="deckCard"></div>
+        <div class="trumpBadge" id="trumpBadge">?</div>
+        <div class="deckCount" id="deckCount">0</div>
+      </div>
+      <div class="stakeBadge" id="stakeBadge">💎 0</div>
+    </div>
+
+    <div class="handWrap">
+      <div class="hand" id="hand"></div>
+    </div>
+
+    <div class="controls">
+      <div class="pillStatus" id="status">…</div>
+      <div class="modeBadges" id="modeBadges" style="display:none;"></div>
+      <button class="btn green" id="btnReady" style="display:none;">Готов</button>
+      <button class="btn orange" id="btnTake" style="display:none;">Беру</button>
+      <button class="btn gray" id="btnPass" style="display:none;">Пас</button>
+      <button class="btn blue" id="btnEnd" style="display:none;">Бито</button>
+      <button class="btn red" id="btnExitLobby" style="display:none;">Выйти (лобби)</button>
+      <button class="btn gray" id="btnInvite" style="display:none;">Пригласить</button>
+    </div>
+
+    <div class="topCenterControls">
+      <button class="btn iconBtn flagBtn" id="btnResign" style="display:none;" aria-label="Сдаться">🏳️</button>
+    </div>
+  </div>
+
+  <!-- Result -->
+  <div class="resultOverlay" id="resultOverlay">
+    <div class="resultCard">
+      <div class="resultTitle" id="resultTitle">Игра окончена</div>
+      <div class="resultMsg" id="resultMsg"></div>
+      <button class="btn blue" id="btnToMenu">В меню</button>
+    </div>
+  </div>
+
+  <div class="resultOverlay" id="passwordOverlay" style="display:none;">
+    <div class="resultCard">
+      <div class="resultTitle">Введите пароль</div>
+      <input class="input" id="joinPasswordInput" placeholder="Пароль" />
+      <div class="row" style="margin-top:8px;">
+        <button class="btn blue" id="btnJoinWithPassword">Войти</button>
+        <button class="btn gray" id="btnCancelPassword">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+
+  <div class="overlayModal" id="uiModal" style="display:none;">
+    <div class="modalCard">
+      <div class="resultTitle" id="uiModalTitle">Статус</div>
+      <div class="muted" id="uiModalText"></div>
+      <div class="row" id="uiModalActions" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <div class="toastStack" id="toastStack"></div>
+
+<script>
+  // ===== Config
+  const BOT_LINK = "https://t.me/evil_cardsbot";
+  document.getElementById("openBotLink").href = BOT_LINK;
+
+  const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+  const API_ORIGIN = (window.__API_ORIGIN__ || localStorage.getItem("evil_api_origin") || "").trim();
+  const API_PREFIX = (window.__API_PREFIX__ || localStorage.getItem("evil_api_prefix") || "").trim();
+
+  function normalizeApiBase(){
+    if (/^https?:\/\//i.test(API_ORIGIN)) {
+      return API_ORIGIN.replace(/\/$/, "");
+    }
+    const cleanPrefix = API_PREFIX ? (API_PREFIX.startsWith("/") ? API_PREFIX : `/${API_PREFIX}`) : "";
+    return (location.origin + cleanPrefix).replace(/\/$/, "");
+  }
+
+  const API_BASE = normalizeApiBase();
+
+  // ===== Telegram detect
+  const tg = window.Telegram?.WebApp;
+  const inTG = !!(tg && tg.initData);
+
+  const blockOverlay = document.getElementById("blockOverlay");
+  if (!inTG) {
+    blockOverlay.style.display = "grid";
+  } else {
+    try {
+      tg.ready();
+      tg.expand();
+      if (typeof tg.requestFullscreen === "function") tg.requestFullscreen();
+      if (typeof tg.disableClosingConfirmation === "function") tg.disableClosingConfirmation();
+      if (typeof tg.setHeaderColor === "function") tg.setHeaderColor("#0b3d2e");
+      if (typeof tg.setBackgroundColor === "function") tg.setBackgroundColor("#0b3d2e");
+    } catch(e){}
+  }
+
+  // ===== Prevent pull-to-close / scroll close
+  // Block vertical page gestures except inside .list (pan-y) and inside hand (pan-x)
+  window.addEventListener("touchmove", (e) => {
+    const t = e.target;
+    const inList = t && t.closest && t.closest(".list");
+    const inHand = t && t.closest && t.closest("#hand");
+    const inSlider = t && t.closest && (t.closest(".stakeSlider") || t.closest("input[type=range]"));
+    if (!inList && !inHand && !inSlider) e.preventDefault();
+  }, { passive:false });
+
+  // ===== Identity
+  function getUserKey(){
+    if (inTG) {
+      const u = tg.initDataUnsafe?.user;
+      if (u?.id) return "tg:" + u.id;
+    }
+    let k = localStorage.getItem("evil_userKey");
+    if (!k) {
+      k = "web:" + Math.random().toString(16).slice(2) + Date.now().toString(16);
+      localStorage.setItem("evil_userKey", k);
+    }
+    return k;
+  }
+  function getProfile(){
+    if (inTG) {
+      const u = tg.initDataUnsafe?.user;
+      if (u) {
+        const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username || "Player";
+        const username = u.username ? ("@" + u.username) : "";
+        const photoUrl = u.photo_url || "";
+        return { name, username, photoUrl };
+      }
+    }
+    return { name:"Player", username:"", photoUrl:"" };
+  }
+  const userKey = getUserKey();
+  let profile = getProfile();
+
+  // profile UI
+  const profAva = document.getElementById("profAva");
+  const profName = document.getElementById("profName");
+  const profUser = document.getElementById("profUser");
+  function renderProfile() {
+    profName.textContent = profile.name || "Player";
+    profUser.textContent = profile.username || "";
+    profAva.innerHTML = "";
+    if (profile.photoUrl) {
+      const img = document.createElement("img");
+      img.src = profile.photoUrl;
+      img.style.width = "100%";
+      img.style.height = "100%";
+      img.style.objectFit = "cover";
+      profAva.appendChild(img);
+    } else {
+      profAva.textContent = (profile.name || "P").slice(0,1).toUpperCase();
+    }
+  }
+  function profilesEqual(a, b){
+    return a?.name === b?.name && a?.username === b?.username && a?.photoUrl === b?.photoUrl;
+  }
+  function refreshProfileFromTG() {
+    if (!inTG) return false;
+    const next = getProfile();
+    if (!profilesEqual(profile, next)) {
+      profile = next;
+      renderProfile();
+      sendMsg({ type:"profile_update", profile });
+      return true;
+    }
+    return false;
+  }
+  renderProfile();
+  let currentBalances = { ton: 0, stars: 0 };
+  const balanceBreakdown = document.getElementById("balanceBreakdown");
+  function renderBalance() {
+    const ton = Number(currentBalances.ton || 0);
+    const stars = Number(currentBalances.stars || 0);
+    balanceBreakdown.textContent = `TON: ${ton.toFixed(2)} • STARS: ${Math.floor(stars)}`;
+    const profileText = `TON: ${ton.toFixed(2)} • ⭐: ${Math.floor(stars)}`;
+    const profileChip = document.getElementById("profileBalanceChip");
+    if (profileChip) profileChip.textContent = profileText;
+    for (const chip of document.querySelectorAll(".tabBalance")) chip.textContent = profileText;
+    const balanceVal = document.getElementById("balanceVal");
+    if (balanceVal) balanceVal.textContent = ton.toFixed(2);
+  }
+  renderBalance();
+
+  const uiModal = document.getElementById("uiModal");
+  const uiModalTitle = document.getElementById("uiModalTitle");
+  const uiModalText = document.getElementById("uiModalText");
+  const uiModalActions = document.getElementById("uiModalActions");
+  const toastStack = document.getElementById("toastStack");
+  const topupOverlay = document.getElementById("topupOverlay");
+  const btnCloseTopup = document.getElementById("btnCloseTopup");
+  const profileBalanceChip = document.getElementById("profileBalanceChip");
+
+  function showToast(text, type = "") {
+    if (!toastStack) return;
+    const t = document.createElement("div");
+    t.className = `toast ${type}`.trim();
+    t.textContent = text;
+    toastStack.appendChild(t);
+    setTimeout(() => t.remove(), 2800);
+  }
+
+  function openModal({ title, text, actions = [] }) {
+    uiModalTitle.textContent = title || "Статус";
+    uiModalText.textContent = text || "";
+    uiModalActions.innerHTML = "";
+    for (const action of actions) {
+      const b = document.createElement("button");
+      b.className = `btn ${action.variant || "blue"}`;
+      b.textContent = action.label;
+      b.onclick = () => {
+        uiModal.style.display = "none";
+        action.onClick?.();
+      };
+      uiModalActions.appendChild(b);
+    }
+    uiModal.style.display = "flex";
+  }
+
+  function openTopupModal(currency = "ton") {
+    setTab("profile");
+    uiModal.style.display = "none";
+    if (topupOverlay) topupOverlay.style.display = "flex";
+    if (currency === "ton") {
+      btnTopupTon.click();
+      topupTonInput.focus();
+    } else {
+      topupStarsInput.focus();
+    }
+  }
+
+  function openInsufficientFundsModal(currency, stake, source = "") {
+    const currencyLabel = currency === "stars" ? "⭐" : "💎";
+    openModal({
+      title: "Недостаточно средств",
+      text: `Для ${source === "quick" ? "быстрой игры" : "входа/создания лобби"} требуется ${currencyLabel} ${stake}.`,
+      actions: [
+        { label: "Пополнить баланс", variant: "blue", onClick: () => openTopupModal(currency) },
+        { label: "Позже", variant: "gray", onClick: () => {} }
+      ]
+    });
+  }
+
+  if (profileBalanceChip) {
+    profileBalanceChip.classList.add("clickable");
+    profileBalanceChip.onclick = () => openTopupModal("ton");
+  }
+  if (btnCloseTopup) btnCloseTopup.onclick = () => { if (topupOverlay) topupOverlay.style.display = "none"; };
+  if (topupOverlay) {
+    topupOverlay.addEventListener("click", (e) => {
+      if (e.target === topupOverlay) topupOverlay.style.display = "none";
+    });
+  }
+
+  try {
+    const last = JSON.parse(localStorage.getItem("evil_last_result") || "null");
+    const row = document.getElementById("lastGameInfo");
+    if (last && row) row.textContent = "Последняя игра сохранена";
+  } catch {}
+  if (inTG) {
+    let tries = 0;
+    const poll = setInterval(() => {
+      tries += 1;
+      const updated = refreshProfileFromTG();
+      if (updated || tries > 12) clearInterval(poll);
+    }, 500);
+  }
+
+  // ===== Tabs
+  const tabsEl = document.getElementById("tabs");
+
+  const screens = {
+    profile: document.getElementById("screenProfile"),
+    public: document.getElementById("screenPublic"),
+    private: document.getElementById("screenPrivate"),
+    create: document.getElementById("screenCreate"),
+  };
+
+  function setTab(name){
+    for (const k in screens) screens[k].classList.remove("active");
+    screens[name].classList.add("active");
+    document.querySelectorAll(".tabBtn").forEach(b => b.classList.remove("active"));
+    document.getElementById("tab"+name[0].toUpperCase()+name.slice(1)).classList.add("active");
+  }
+
+  document.getElementById("tabProfile").onclick = () => setTab("profile");
+  document.getElementById("tabPublic").onclick  = () => setTab("public");
+  document.getElementById("tabPrivate").onclick = () => setTab("private");
+  document.getElementById("tabCreate").onclick  = () => setTab("create");
+
+  function hideMenuForGame(on){
+    tabsEl.classList.toggle("hidden", !!on);
+    document.getElementById("app").style.display = on ? "none" : "block";
+  }
+
+  // ===== WS
+  let ws = null;
+  let lobbiesPublic = [];
+  let lobbiesPrivate = [];
+  let quickSearching = false;
+  let kickedOff = false;
+
+  let roomId = localStorage.getItem("evil_roomId") || "";
+  let roomPass = localStorage.getItem("evil_roomPass") || "";
+  let joinAttemptSource = null;
+
+  let lobbyState = null;
+  let gameState = null;
+  let ready = false;
+  let lobbyReadyDeadlineTs = null;
+
+  function resetToMenu(message, disableReconnect = false){
+    lobbyState = null;
+    gameState = null;
+    ready = false;
+    joinAttemptSource = null;
+    localStorage.setItem("evil_in_game", "0");
+    roomId = "";
+    roomPass = "";
+    localStorage.setItem("evil_roomId", "");
+    localStorage.setItem("evil_roomPass", "");
+    if (message) {
+      showToast(message, "error");
+      showError(message);
+    }
+    if (disableReconnect) kickedOff = true;
+    const wrap = document.getElementById("gameWrap");
+    if (wrap) wrap.classList.remove("active");
+    hideMenuForGame(false);
+    requestLists();
+    setTab("profile");
+  }
+
+  function connectWS(){
+    ws = new WebSocket(WS_URL);
+    ws.onopen = () => {
+      sendMsg({ type:"hello", userKey, profile });
+      requestLists();
+    };
+    ws.onclose = () => {
+      if (kickedOff) return;
+      setTimeout(connectWS, 650);
+    };
+    ws.onmessage = (ev) => {
+      let msg;
+      try{ msg = JSON.parse(ev.data); }catch(e){ return; }
+
+      if (msg.type === "error") {
+        const message = msg.message || "Ошибка";
+        if (message === "Комната не найдена" && joinAttemptSource === "auto") {
+          joinAttemptSource = null;
+          roomId = "";
+          roomPass = "";
+          localStorage.setItem("evil_roomId", "");
+          localStorage.setItem("evil_roomPass", "");
+          return;
+        }
+        showError(message);
+        if (message === "Неверный пароль" && roomId) {
+          pendingPrivateJoin = { id: roomId };
+          joinPasswordInput.value = "";
+          passwordOverlay.style.display = "flex";
+        }
+        return;
+      }
+      if (msg.type === "emoji") {
+        const seat = Number.isFinite(msg.seat) ? msg.seat : null;
+        const role = msg.role || "";
+        const emoji = msg.emoji || "";
+        playAvatarEmoji({ seat, role, emoji });
+        return;
+      }
+
+      if (msg.type === "kicked") {
+        resetToMenu(msg.message || "Вы зашли с другого устройства.", true);
+        return;
+      }
+
+      if (msg.type === "lobbies") {
+        lobbiesPublic = Array.isArray(msg.public) ? msg.public : [];
+        lobbiesPrivate = Array.isArray(msg.private) ? msg.private : [];
+        renderLists();
+        return;
+      }
+
+      if (msg.type === "quick_status") {
+        quickSearching = !!msg.searching;
+        updateQuickUI();
+        if (msg.matched && msg.roomId) {
+          localStorage.setItem("evil_roomId", msg.roomId);
+          roomId = msg.roomId;
+          roomPass = "";
+          localStorage.setItem("evil_roomPass", "");
+        }
+        return;
+      }
+
+      if (msg.type === "balance") {
+        if (msg.balances && typeof msg.balances === "object") {
+          currentBalances = {
+            ton: Number(msg.balances.ton || 0),
+            stars: Number(msg.balances.stars || 0)
+          };
+        }
+        linkedWalletAddress = String(msg.walletAddress || linkedWalletAddress || "");
+        renderBalance();
+        if (!createCurrencyTouched) {
+          if (currentBalances.ton >= Math.max(1, Number(createStake || 1))) createCurrency = "ton";
+          else if (currentBalances.stars >= 50) createCurrency = "stars";
+          renderStakeUi();
+        }
+        refreshWalletBalanceUi().finally(syncTonTopupUi);
+        syncTonTopupUi();
+        return;
+      }
+
+      if (msg.type === "lobby_created" || msg.type === "joined") {
+        if (msg.roomId) {
+          roomId = msg.roomId;
+          localStorage.setItem("evil_roomId", roomId);
+        }
+        joinAttemptSource = null;
+        ready = false;
+        lobbyState = null;
+        gameState = null;
+
+        // ENTER FULLSCREEN GAME VIEW (lobby/game only)
+        hideMenuForGame(true);
+        showLobbyUI(true);
+        return;
+      }
+
+      if (msg.type === "lobby_state") {
+        lobbyState = msg;
+        gameState = null;
+        joinAttemptSource = null;
+        lobbyReadyDeadlineTs = msg.readyDeadlineTs || null;
+        localStorage.setItem("evil_in_game", "0");
+        hideMenuForGame(true);
+        renderLobby();
+        showLobbyUI(true);
+        return;
+      }
+
+      if (msg.type === "state") {
+        gameState = msg.state;
+        lobbyState = null;
+        joinAttemptSource = null;
+        lobbyReadyDeadlineTs = null;
+        localStorage.setItem("evil_in_game", "1");
+        hideMenuForGame(true);
+        renderGame();
+        showLobbyUI(false);
+        return;
+      }
+    };
+  }
+
+  function sendMsg(obj){
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  }
+  function requestLists(){
+    sendMsg({ type:"list_lobbies" });
+  }
+
+  connectWS();
+  setInterval(() => requestLists(), 5000);
+
+  // Refresh buttons (only in lobbies screens)
+  document.getElementById("btnRefreshPub").onclick = () => requestLists();
+  document.getElementById("btnRefreshPriv").onclick = () => requestLists();
+
+  // ===== Quick match
+  const btnQuick = document.getElementById("btnQuick");
+  const btnQuickCancel = document.getElementById("btnQuickCancel");
+  function updateQuickUI(){
+    btnQuick.style.display = quickSearching ? "none" : "inline-block";
+    btnQuickCancel.style.display = quickSearching ? "inline-block" : "none";
+  }
+  updateQuickUI();
+
+  btnQuick.onclick = () => {
+    if (currentBalances.ton >= 1) {
+      sendMsg({ type:"quick_match", userKey, profile, stake: 1, currency:"ton" });
+    } else if (currentBalances.stars >= 50) {
+      sendMsg({ type:"quick_match", userKey, profile, stake: 50, currency:"stars" });
+    } else {
+      openInsufficientFundsModal("ton", 1, "quick");
+    }
+  };
+  btnQuickCancel.onclick = () => {
+    sendMsg({ type:"quick_cancel", userKey });
+  };
+
+  const btnTopupTon = document.getElementById("btnTopupTon");
+  const btnTopupStars = document.getElementById("btnTopupStars");
+  const btnPayTon = document.getElementById("btnPayTon");
+  const topupTonInput = document.getElementById("topupTonInput");
+  const topupStarsInput = document.getElementById("topupStarsInput");
+  const tonOrderInfo = document.getElementById("tonOrderInfo");
+  const tonTopupControls = document.getElementById("tonTopupControls");
+  const tonWalletInfo = document.getElementById("tonWalletInfo");
+  let linkedWalletAddress = "";
+  let walletTonBalance = null;
+  const tonWalletBalanceInfo = document.getElementById("tonWalletBalanceInfo");
+  function formatWalletAddress(addr) {
+    const raw = String(addr || "").trim();
+    if (!raw) return "";
+    let norm = raw;
+    try {
+      if (window.TonWeb?.Address) {
+        const a = new TonWeb.Address(raw);
+        norm = a.toString(true, true, true);
+      }
+    } catch {}
+    if (norm.length <= 8) return norm;
+    return `${norm.slice(0, 4)}...${norm.slice(-4)}`;
+  }
+  async function refreshWalletBalanceUi() {
+    if (!linkedWalletAddress) {
+      walletTonBalance = null;
+      tonWalletBalanceInfo.textContent = "Баланс кошелька: —";
+      return;
+    }
+    try {
+      const j = await safeFetchJson("/pay/ton/wallet-balance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: linkedWalletAddress })
+      });
+      walletTonBalance = Number(j.ton || 0);
+      tonWalletBalanceInfo.textContent = `Баланс кошелька: ${walletTonBalance.toFixed(2)} TON`;
+    } catch (e) {
+      tonWalletBalanceInfo.textContent = "Баланс кошелька: недоступен";
+      tonOrderInfo.textContent = "Не удалось получить баланс кошелька: " + (e?.message || "ошибка");
+    }
+  }
+  const tonConnectManifestUrl = "https://durak.clown-on-stonks.fun/tonconnect-manifest.json";
+  console.info("[tonconnect] manifest url", tonConnectManifestUrl);
+  const tonConnectUI = (window.TON_CONNECT_UI)
+    ? new TON_CONNECT_UI.TonConnectUI({ manifestUrl: tonConnectManifestUrl })
+    : null;
+
+  tonConnectUI?.onStatusChange(async (wallet) => {
+    linkedWalletAddress = String(wallet?.account?.address || "");
+    sendMsg({ type:"wallet_bind", walletAddress: linkedWalletAddress, userKey });
+    if (linkedWalletAddress) await refreshWalletBalanceUi();
+    syncTonTopupUi();
+  });
+
+  function buildApiPath(urlPath) {
+    if (/^https?:\/\//.test(urlPath)) return urlPath;
+    const clean = String(urlPath || "").startsWith("/") ? String(urlPath) : `/${urlPath}`;
+    if (API_BASE) return `${API_BASE}${clean}`;
+    return clean;
+  }
+
+  async function safeFetchJson(url, options = {}) {
+    const reqOptions = { ...options };
+    reqOptions.headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+
+    const clean = String(url || "").startsWith("/") ? String(url) : `/${url}`;
+    const candidates = [buildApiPath(clean)];
+    if (/^\/pay\//.test(clean)) {
+      const apiCandidate = `${location.origin}/api${clean}`;
+      const bareCandidate = `${location.origin}${clean}`;
+      if (!candidates.includes(apiCandidate)) candidates.push(apiCandidate);
+      if (!candidates.includes(bareCandidate)) candidates.push(bareCandidate);
+    }
+
+    let lastErr = null;
+    for (const finalUrl of candidates) {
+      const r = await fetch(finalUrl, reqOptions);
+      const text = await r.text();
+      const isJson = (r.headers.get("content-type") || "").includes("application/json");
+      let data = null;
+      if (text && isJson) {
+        try { data = JSON.parse(text); } catch {}
+      }
+      if (r.ok && (!data || data.ok !== false)) {
+        if (text && !isJson) throw new Error("Сервер вернул не-JSON ответ");
+        return data || { ok: true };
+      }
+      const msg = data?.error || data?.message || (text && !isJson ? text.slice(0, 180) : `HTTP ${r.status}`);
+      lastErr = new Error(msg === "method_not_allowed" ? "Маршрут недоступен для этого метода (405)." : msg);
+      if (![404, 405].includes(r.status)) break;
+    }
+
+    throw lastErr || new Error("api_request_failed");
+  }
+
+  function syncTonTopupUi() {
+    const connected = !!linkedWalletAddress || !!tonConnectUI?.connected;
+    tonTopupControls.style.display = connected ? "flex" : "none";
+    btnTopupTon.style.display = connected ? "none" : "inline-flex";
+    tonWalletInfo.innerHTML = connected
+      ? `Кошелёк: <span class="walletLink" id="walletDisconnectLink">${formatWalletAddress(linkedWalletAddress || tonConnectUI?.account?.address || "подключен")}</span>`
+      : "Кошелёк не подключен";
+    if (!connected) tonWalletBalanceInfo.textContent = "Баланс кошелька: —";
+    const walletDisconnectLink = document.getElementById("walletDisconnectLink");
+    if (walletDisconnectLink) {
+      walletDisconnectLink.onclick = () => {
+        openModal({
+          title: "Disconnect wallet?",
+          text: "Вы уверены, что хотите отключить TON кошелёк?",
+          actions: [
+            {
+              label: "Yes",
+              variant: "red",
+              onClick: async () => {
+                try {
+                  await tonConnectUI?.disconnect();
+                } catch {}
+                linkedWalletAddress = "";
+                walletTonBalance = null;
+                sendMsg({ type:"wallet_bind", walletAddress: "", userKey });
+                syncTonTopupUi();
+              }
+            },
+            { label: "No", variant: "gray" }
+          ]
+        });
+      };
+    }
+  }
+  syncTonTopupUi();
+
+
+  async function buildTonCommentPayload(comment) {
+    const text = String(comment || "");
+    if (!text) return undefined;
+    try {
+      const cell = new TonWeb.boc.Cell();
+      cell.bits.writeUint(0, 32);
+      cell.bits.writeBytes(TonWeb.utils.stringToBytes(text));
+      const boc = await cell.toBoc(false);
+      return TonWeb.utils.bytesToBase64(boc);
+    } catch (e) {
+      console.warn("[ton] payload encode fallback", e?.message || e);
+      return btoa(unescape(encodeURIComponent(text)));
+    }
+  }
+
+  async function pollTonConfirm(orderId, userId) {
+    const started = Date.now();
+    while (Date.now() - started < 90000) {
+      try {
+        await safeFetchJson("/pay/ton/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId, userId })
+        });
+        return true;
+      } catch {}
+      await new Promise(r => setTimeout(r, 2500));
+    }
+    return false;
+  }
+
+  btnTopupStars.onclick = async () => {
+    const userId = (inTG && tg.initDataUnsafe?.user?.id) ? String(tg.initDataUnsafe.user.id) : String(userKey || "").replace(/^tg:/, "");
+    const stars = Math.max(1, Math.floor(Number(topupStarsInput.value || 0)));
+    topupStarsInput.value = String(stars);
+    try {
+      const j = await safeFetchJson("/pay/stars/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, stars })
+      });
+      if (!j.url) throw new Error("stars_link_failed");
+      if (tg && typeof tg.openInvoice === "function") {
+        tg.openInvoice(j.url, async (status) => {
+          if (status === "paid") {
+            showToast("Оплата Stars успешна", "success");
+            requestBalance();
+            requestLists();
+          } else if (status === "failed") {
+            showToast("Оплата Stars не завершена", "error");
+          }
+        });
+      } else tonOrderInfo.textContent = "Оплата доступна только в Telegram.";
+    } catch (e) {
+      tonOrderInfo.textContent = "Ошибка пополнения ⭐: " + (e?.message || "неизвестная ошибка");
+    }
+  };
+
+
+  btnTopupTon.onclick = async () => {
+    if (!tonConnectUI) { tonOrderInfo.textContent = "TON Connect недоступен"; return; }
+    if (!tonConnectUI.connected) await tonConnectUI.openModal();
+    if (tonConnectUI.account?.address) {
+      linkedWalletAddress = tonConnectUI.account.address;
+      sendMsg({ type:"wallet_bind", walletAddress: linkedWalletAddress, userKey });
+      await refreshWalletBalanceUi();
+      syncTonTopupUi();
+    }
+  };
+
+  btnPayTon.onclick = async () => {
+    const userId = (inTG && tg.initDataUnsafe?.user?.id) ? String(tg.initDataUnsafe.user.id) : String(userKey || "").replace(/^tg:/, "");
+    const ton = Math.max(0.1, Math.round(Number(topupTonInput.value || 0) * 100) / 100);
+    topupTonInput.value = ton.toFixed(2);
+    try {
+      if (!tonConnectUI) throw new Error("ton_connect_missing");
+      if (!tonConnectUI.connected) await tonConnectUI.openModal();
+      const ord = await safeFetchJson("/pay/ton/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, ton })
+      });
+      pendingTonOrder = ord;
+      tonOrderInfo.textContent = `Оплата TON: ${ton} отправлена...`;
+      const payload = await buildTonCommentPayload(ord.comment || "");
+      await tonConnectUI.sendTransaction({
+        validUntil: Math.floor(Date.now() / 1000) + 600,
+        messages: [{ address: ord.to, amount: ord.amountNano, payload }]
+      });
+      const ok = await pollTonConfirm(ord.orderId, userId);
+      tonOrderInfo.textContent = ok ? `Вы пополнили ${ton} TON успешно` : "Не удалось подтвердить TON за время ожидания";
+      if (ok) pendingTonOrder = null;
+      if (ok) {
+        requestBalance();
+        await refreshWalletBalanceUi();
+        syncTonTopupUi();
+      }
+    } catch (e) {
+      tonOrderInfo.textContent = "Ошибка пополнения TON: " + (e?.message || "неизвестная ошибка");
+    }
+  };
+
+  // ===== Create lobby
+  let createPlayers = 2;
+  let createTransfer = false;
+  let createWinMode = "classic";
+  let createThrowInMode = "all";
+  let createCurrency = localStorage.getItem("evil_last_currency") || "ton";
+  let createCurrencyTouched = false;
+  let createStake = 1;
+
+  const btnP2 = document.getElementById("btnP2");
+  const btnP3 = document.getElementById("btnP3");
+  const btnP4 = document.getElementById("btnP4");
+  const btnP5 = document.getElementById("btnP5");
+  const btnP6 = document.getElementById("btnP6");
+  const btnCurTon = document.getElementById("btnCurTon");
+  const btnCurStars = document.getElementById("btnCurStars");
+  const stakeInput = document.getElementById("stakeInput");
+  const stakeLabel = document.getElementById("stakeLabel");
+
+  function renderStakeUi(){
+    btnCurTon.style.opacity = createCurrency === "ton" ? "1" : ".7";
+    btnCurStars.style.opacity = createCurrency === "stars" ? "1" : ".7";
+    if (createCurrency === "ton") {
+      stakeInput.min = "1";
+      stakeInput.max = "100";
+      stakeInput.step = "1";
+      if (!Number.isInteger(createStake) || createStake < 1) createStake = 1;
+      stakeLabel.textContent = `Ставка: ${createStake} TON`;
+    } else {
+      stakeInput.min = "50";
+      stakeInput.max = "10000";
+      stakeInput.step = "50";
+      if (!Number.isInteger(createStake) || createStake < 50 || createStake % 50 !== 0) createStake = 50;
+      stakeLabel.textContent = `Ставка: ${createStake} ⭐`;
+    }
+    stakeInput.value = String(createStake);
+    if (btnCreateLobby) btnCreateLobby.textContent = createCurrency === "ton" ? "Создать TON" : "Создать ⭐";
+  }
+  const btnCreateLobby = document.getElementById("btnCreateLobby");
+  function convertStake(target) {
+    if (target === createCurrency) return;
+    if (target === "stars") createStake = Math.max(50, Math.round((createStake * 100) / 50) * 50);
+    else createStake = Math.max(1, Math.floor(createStake / 100));
+    createCurrency = target;
+  }
+  btnCurTon.onclick = () => { createCurrencyTouched = true; convertStake("ton"); localStorage.setItem("evil_last_currency", "ton"); renderStakeUi(); };
+  btnCurStars.onclick = () => { createCurrencyTouched = true; convertStake("stars"); localStorage.setItem("evil_last_currency", "stars"); renderStakeUi(); };
+  stakeInput.oninput = () => {
+    createStake = Number(stakeInput.value || 0);
+    if (createCurrency === "ton") {
+      createStake = Math.max(1, Math.round(createStake));
+    } else {
+      createStake = Math.max(50, Math.round(createStake / 50) * 50);
+    }
+    renderStakeUi();
+  };
+  renderStakeUi();
+
+  function renderCreatePlayers(){
+    btnP2.style.opacity = createPlayers===2 ? "1" : ".7";
+    btnP3.style.opacity = createPlayers===3 ? "1" : ".7";
+    btnP4.style.opacity = createPlayers===4 ? "1" : ".7";
+    btnP5.style.opacity = createPlayers===5 ? "1" : ".7";
+    btnP6.style.opacity = createPlayers===6 ? "1" : ".7";
+  }
+
+  btnP2.onclick = () => { createPlayers=2; renderCreatePlayers(); renderThrowInMode(); };
+  btnP3.onclick = () => { createPlayers=3; renderCreatePlayers(); renderThrowInMode(); };
+  btnP4.onclick = () => { createPlayers=4; renderCreatePlayers(); renderThrowInMode(); };
+  btnP5.onclick = () => { createPlayers=5; renderCreatePlayers(); renderThrowInMode(); };
+  btnP6.onclick = () => { createPlayers=6; renderCreatePlayers(); renderThrowInMode(); };
+
+  const passInput = document.getElementById("passInput");
+  const privateCheck = document.getElementById("privateCheck");
+  const passWrap = document.getElementById("passWrap");
+  privateCheck.onchange = () => {
+    passWrap.style.display = privateCheck.checked ? "block" : "none";
+    if (!privateCheck.checked) passInput.value = "";
+  };
+
+  const btnTransferOff = document.getElementById("btnTransferOff");
+  const btnTransferOn = document.getElementById("btnTransferOn");
+  function renderTransferCreate(){
+    btnTransferOff.style.opacity = createTransfer ? ".7" : "1";
+    btnTransferOn.style.opacity = createTransfer ? "1" : ".7";
+  }
+  btnTransferOff.onclick = () => { createTransfer = false; renderTransferCreate(); };
+  btnTransferOn.onclick = () => { createTransfer = true; renderTransferCreate(); };
+  renderTransferCreate();
+
+  const btnThrowAll = document.getElementById("btnThrowAll");
+  const btnThrowNeighbors = document.getElementById("btnThrowNeighbors");
+  function renderThrowInMode(){
+    const allowAll = createPlayers >= 4;
+    if (!allowAll) createThrowInMode = "neighbors";
+    btnThrowAll.style.opacity = allowAll ? (createThrowInMode === "all" ? "1" : ".7") : ".4";
+    btnThrowNeighbors.style.opacity = createThrowInMode === "neighbors" ? "1" : ".7";
+    btnThrowAll.disabled = !allowAll;
+    btnThrowAll.style.pointerEvents = allowAll ? "auto" : "none";
+  }
+  btnThrowAll.onclick = () => {
+    if (createPlayers < 4) return;
+    createThrowInMode = "all";
+    renderThrowInMode();
+  };
+  btnThrowNeighbors.onclick = () => {
+    createThrowInMode = "neighbors";
+    renderThrowInMode();
+  };
+  renderThrowInMode();
+
+  const btnModeClassic = document.getElementById("btnModeClassic");
+  const btnModeDraw = document.getElementById("btnModeDraw");
+  function renderCreateWinMode(){
+    btnModeClassic.style.opacity = (createWinMode==="classic") ? "1" : ".7";
+    btnModeDraw.style.opacity = (createWinMode==="draw") ? "1" : ".7";
+  }
+  btnModeClassic.onclick = () => { createWinMode="classic"; renderCreateWinMode(); };
+  btnModeDraw.onclick = () => { createWinMode="draw"; renderCreateWinMode(); };
+  renderCreateWinMode();
+
+  renderCreatePlayers();
+
+  function createModeIconSvg(kind){
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "modeIconMini");
+    svg.setAttribute("viewBox", "0 0 48 48");
+    const add = (tag, attrs) => {
+      const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+      svg.appendChild(el);
+    };
+    if (kind === "transferOff") {
+      add("rect", { x:10, y:12, width:18, height:24, rx:3 });
+      add("path", { d:"M30 24h10" });
+      add("path", { d:"M36 20l4 4-4 4" });
+    } else if (kind === "transferOn") {
+      add("rect", { x:10, y:12, width:18, height:24, rx:3 });
+      add("path", { d:"M24 21a5 5 0 1 1-3-3" });
+      add("path", { d:"M23 16h5v5" });
+    } else if (kind === "throwAll") {
+      add("rect", { x:14, y:16, width:20, height:16, rx:3 });
+      add("path", { d:"M8 12l6 6" });
+      add("path", { d:"M40 12l-6 6" });
+      add("path", { d:"M24 6v10" });
+    } else if (kind === "throwNeighbors") {
+      add("rect", { x:14, y:16, width:20, height:16, rx:3 });
+      add("path", { d:"M8 20l6 4" });
+      add("path", { d:"M40 20l-6 4" });
+    } else if (kind === "winClassic") {
+      add("path", { d:"M6 30c6-10 12-14 18-14s12 4 18 14" });
+      add("path", { d:"M8 32h32" });
+      add("circle", { cx:24, cy:12, r:3 });
+    } else if (kind === "winDraw") {
+      add("rect", { x:12, y:10, width:24, height:28, rx:4 });
+      add("line", { x1:12, y1:24, x2:36, y2:24 });
+      add("circle", { cx:24, cy:16, r:2 });
+      add("circle", { cx:24, cy:32, r:2 });
+    }
+    return svg;
+  }
+
+  function buildModeIcons({ allowTransfer, throwInMode, winMode }){
+    const wrap = document.createElement("div");
+    wrap.className = "modeIcons";
+    wrap.appendChild(createModeIconSvg(allowTransfer ? "transferOn" : "transferOff"));
+    wrap.appendChild(createModeIconSvg(throwInMode === "neighbors" ? "throwNeighbors" : "throwAll"));
+    wrap.appendChild(createModeIconSvg(winMode === "draw" ? "winDraw" : "winClassic"));
+    return wrap;
+  }
+
+  const errCreate = document.getElementById("errCreate");
+  function submitCreate(){
+    errCreate.textContent = "";
+    const pass = (passInput.value || "").trim();
+    roomPass = pass;
+    localStorage.setItem("evil_roomPass", roomPass);
+
+    const finalCurrency = createCurrency;
+    let finalStake = Number(createStake);
+    if (finalCurrency === "ton") {
+      finalStake = Math.max(1, Math.round(finalStake));
+    } else {
+      finalStake = Math.max(50, Math.round(finalStake / 50) * 50);
+    }
+
+    if (Number(currentBalances[finalCurrency] || 0) < Number(finalStake)) {
+      openInsufficientFundsModal(finalCurrency, finalStake, "create");
+      return;
+    }
+
+    sendMsg({
+      type:"create_lobby",
+      userKey,
+      profile,
+      maxPlayers: createPlayers,
+      winMode: createWinMode,
+      allowTransfer: createTransfer,
+      throwInMode: createThrowInMode,
+      stake: finalStake,
+      currency: finalCurrency,
+      password: privateCheck.checked ? pass : ""
+    });
+  }
+  document.getElementById("btnCreateLobby").onclick = () => submitCreate();
+
+  // ===== Lists render
+  const listPublic = document.getElementById("listPublic");
+  const listPrivate = document.getElementById("listPrivate");
+  const errPublic = document.getElementById("errPublic");
+  const errPrivate = document.getElementById("errPrivate");
+  const filterCurrency = document.getElementById("filterCurrency");
+  const filterTransfer = document.getElementById("filterTransfer");
+  const filterThrow = document.getElementById("filterThrow");
+  const filterWin = document.getElementById("filterWin");
+  const filterCurrencyPriv = document.getElementById("filterCurrencyPriv");
+  const filterTransferPriv = document.getElementById("filterTransferPriv");
+  const filterThrowPriv = document.getElementById("filterThrowPriv");
+  const filterWinPriv = document.getElementById("filterWinPriv");
+  function syncFilters(fromPrivate = false){
+    if (fromPrivate) {
+      filterCurrency.value = filterCurrencyPriv.value;
+      filterTransfer.value = filterTransferPriv.value;
+      filterThrow.value = filterThrowPriv.value;
+      filterWin.value = filterWinPriv.value;
+    } else {
+      filterCurrencyPriv.value = filterCurrency.value;
+      filterTransferPriv.value = filterTransfer.value;
+      filterThrowPriv.value = filterThrow.value;
+      filterWinPriv.value = filterWin.value;
+    }
+    renderLists();
+  }
+  [filterCurrency, filterTransfer, filterThrow, filterWin].forEach(el => el && (el.onchange = () => syncFilters(false)));
+  [filterCurrencyPriv, filterTransferPriv, filterThrowPriv, filterWinPriv].forEach(el => el && (el.onchange = () => syncFilters(true)));
+  const passwordOverlay = document.getElementById("passwordOverlay");
+  const joinPasswordInput = document.getElementById("joinPasswordInput");
+  let pendingPrivateJoin = null;
+  document.getElementById("btnCancelPassword").onclick = () => { pendingPrivateJoin = null; passwordOverlay.style.display = "none"; };
+  document.getElementById("btnJoinWithPassword").onclick = () => {
+    if (!pendingPrivateJoin) return;
+    const pass = (joinPasswordInput.value || "").trim();
+    roomId = pendingPrivateJoin.id;
+    roomPass = pass;
+    localStorage.setItem("evil_roomId", roomId);
+    localStorage.setItem("evil_roomPass", roomPass);
+    joinAttemptSource = "manual";
+    sendMsg({ type:"join_lobby", userKey, profile, roomId, password: pass });
+    passwordOverlay.style.display = "none";
+  };
+
+  function passFilters(it){
+    if (filterCurrency.value !== "all" && it.currency !== filterCurrency.value) return false;
+    if (filterTransfer.value === "on" && !it.allowTransfer) return false;
+    if (filterTransfer.value === "off" && it.allowTransfer) return false;
+    if (filterThrow.value === "neighbors" && it.throwInMode !== "neighbors") return false;
+    if (filterThrow.value === "allOnly" && it.throwInMode !== "all") return false;
+    if (filterWin.value !== "all" && it.winMode !== filterWin.value) return false;
+    return true;
+  }
+
+  function renderLists(){
+    listPublic.innerHTML = "";
+    errPublic.textContent = "";
+    if (!lobbiesPublic.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "Публичных лобби нет.";
+      listPublic.appendChild(empty);
+    } else {
+      for (const it of lobbiesPublic.filter(passFilters)) {
+        const div = document.createElement("div");
+        div.className = "listItem";
+        const enoughBalance = Number(currentBalances[it.currency || "ton"] || 0) >= Number(it.stake || 0);
+        if (!enoughBalance) div.style.opacity = ".45";
+
+        const top = document.createElement("div");
+        top.className = "listTop";
+        const left = document.createElement("div");
+        left.className = "pill";
+        left.textContent = `${it.playersCount}/${it.maxPlayers}`;
+        const right = document.createElement("div");
+        right.className = "pill modePill";
+        right.appendChild(buildModeIcons(it));
+        top.appendChild(left);
+        top.appendChild(right);
+
+        const names = (it.players || []).map(p => shortenLabel(p.username || p.name || p.role, 15)).filter(Boolean).join(" • ");
+        const line = document.createElement("div");
+        line.className = "playersLine";
+        const stakeTxt = it.currency === "stars" ? `${it.stake} ⭐` : `${it.stake} TON`;
+        line.textContent = (names || "—") + ` • Ставка: ${stakeTxt}`;
+
+        const row = document.createElement("div");
+        row.className = "row";
+        const btn = document.createElement("button");
+        btn.className = "btn blue";
+        btn.textContent = "Войти";
+        btn.disabled = !enoughBalance;
+        btn.onclick = () => {
+          if (!enoughBalance) return openInsufficientFundsModal(it.currency || "ton", Number(it.stake || 0));
+          roomId = it.id;
+          localStorage.setItem("evil_roomId", roomId);
+          roomPass = "";
+          localStorage.setItem("evil_roomPass", "");
+          joinAttemptSource = "manual";
+          sendMsg({ type:"join_lobby", userKey, profile, roomId });
+        };
+        row.appendChild(btn);
+
+        div.appendChild(top);
+        div.appendChild(line);
+        div.appendChild(row);
+        listPublic.appendChild(div);
+      }
+    }
+
+    listPrivate.innerHTML = "";
+    errPrivate.textContent = "";
+    if (!lobbiesPrivate.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "Закрытых лобби нет.";
+      listPrivate.appendChild(empty);
+    } else {
+      for (const it of lobbiesPrivate.filter(passFilters)) {
+        const div = document.createElement("div");
+        div.className = "listItem";
+        const enoughBalance = Number(currentBalances[it.currency || "ton"] || 0) >= Number(it.stake || 0);
+        if (!enoughBalance) div.style.opacity = ".45";
+
+        const top = document.createElement("div");
+        top.className = "listTop";
+        const left = document.createElement("div");
+        left.className = "pill";
+        left.textContent = `${it.playersCount}/${it.maxPlayers}`;
+        const right = document.createElement("div");
+        right.className = "pill modePill";
+        right.appendChild(buildModeIcons(it));
+        top.appendChild(left);
+        top.appendChild(right);
+
+        const names = (it.players || []).map(p => shortenLabel(p.username || p.name || p.role, 15)).filter(Boolean).join(" • ");
+        const line = document.createElement("div");
+        line.className = "playersLine";
+        const stakeTxt = it.currency === "stars" ? `${it.stake} ⭐` : `${it.stake} TON`;
+        line.textContent = (names || "—") + ` • Ставка: ${stakeTxt}`;
+
+        const row = document.createElement("div");
+        row.className = "row";
+        const btn = document.createElement("button");
+        btn.className = "btn gray";
+        btn.textContent = "Войти";
+        btn.disabled = !enoughBalance;
+        btn.onclick = () => {
+          if (!enoughBalance) return openInsufficientFundsModal(it.currency || "ton", Number(it.stake || 0));
+          pendingPrivateJoin = it;
+          joinPasswordInput.value = "";
+          passwordOverlay.style.display = "flex";
+        };
+        row.appendChild(btn);
+
+        div.appendChild(top);
+        div.appendChild(line);
+        div.appendChild(row);
+        listPrivate.appendChild(div);
+      }
+    }
+  }
+
+  // ===== Lobby/Game UI
+  const gameWrap = document.getElementById("gameWrap");
+  const btnExitLobby = document.getElementById("btnExitLobby");
+  const btnResign = document.getElementById("btnResign");
+  const btnInvite = document.getElementById("btnInvite");
+
+  function showLobbyUI(isLobby){
+    gameWrap.classList.add("active");
+    hideMenuForGame(true);
+  }
+
+  btnExitLobby.onclick = () => {
+    sendMsg({ type:"leave_lobby" });
+    resetToMenu();
+  };
+
+  btnResign.onclick = () => {
+    if (!gameState) return;
+    openModal({
+      title: "Сдаться?",
+      text: "Вы уверены, что хотите сдаться в этой игре?",
+      actions: [
+        { label: "Да", variant: "red", onClick: () => sendMsg({ type:"action", action:{ kind:"resign" } }) },
+        { label: "Нет", variant: "gray", onClick: () => {} }
+      ]
+    });
+  };
+
+  // ===== Game elements
+  const enemyRow = document.getElementById("enemyRow");
+  const pairs = document.getElementById("pairs");
+  const handEl = document.getElementById("hand");
+  const statusEl = document.getElementById("status");
+  const modeBadges = document.getElementById("modeBadges");
+  const stakeBadge = document.getElementById("stakeBadge");
+  const transferZone = document.getElementById("transferZone");
+
+  const btnReady = document.getElementById("btnReady");
+  const btnTake  = document.getElementById("btnTake");
+  const btnPass  = document.getElementById("btnPass");
+  const btnEnd   = document.getElementById("btnEnd");
+
+  btnReady.onclick = () => {
+    ready = !ready;
+    btnReady.textContent = ready ? "Готов ✓" : "Готов";
+    sendMsg({ type:"ready", ready });
+  };
+
+  btnTake.onclick = () => {
+    btnTake.disabled = true;
+    sendMsg({ type:"action", action:{ kind:"take" } });
+    setTimeout(()=>btnTake.disabled=false, 800);
+  };
+  btnPass.onclick = () => {
+    btnPass.disabled = true;
+    sendMsg({ type:"action", action:{ kind:"pass" } });
+    setTimeout(()=>btnPass.disabled=false, 800);
+  };
+  btnEnd.onclick = () => {
+    sendMsg({ type:"action", action:{ kind:"end" } });
+  };
+
+  function suitClass(s){
+    return (s === "♥" || s === "♦") ? "red" : "black";
+  }
+  function makeCardFace(c){
+    const d = document.createElement("div");
+    d.className = "card";
+    d.dataset.cardId = String(c.id);
+    d.innerHTML = `
+      <div class="corner">
+        <div class="r ${suitClass(c.suit)}">${c.rank}</div>
+        <div class="s ${suitClass(c.suit)}">${c.suit}</div>
+      </div>
+      <div class="corner bottom">
+        <div class="r ${suitClass(c.suit)}">${c.rank}</div>
+        <div class="s ${suitClass(c.suit)}">${c.suit}</div>
+      </div>
+      <div class="big ${suitClass(c.suit)}">${c.suit}</div>
+    `;
+    d.draggable = true;
+    return d;
+  }
+
+  let timerState = { type: null, deadline: null, totalMs: null, activeRole: null, activeRoles: null };
+  let timerRafId = 0;
+  const TIMER_CIRC = 2 * Math.PI * 20;
+
+  function setTimerState(next) {
+    timerState = { type: null, deadline: null, totalMs: null, activeRole: null, activeRoles: null, ...next };
+    startTimerLoop();
+  }
+
+  function startTimerLoop(){
+    if (timerRafId) cancelAnimationFrame(timerRafId);
+    const tick = () => {
+      updateAvatarTimers();
+      if (timerState.deadline && timerState.totalMs) {
+        timerRafId = requestAnimationFrame(tick);
+      }
+    };
+    timerRafId = requestAnimationFrame(tick);
+  }
+
+  function updateAvatarTimers(){
+    const avatars = document.querySelectorAll(".enemy .avatarWrap");
+    if (!avatars.length) return;
+    const { type, deadline, totalMs, activeRole, activeRoles } = timerState;
+    if (!deadline || !totalMs) {
+      avatars.forEach((ava) => {
+        const ring = ava.querySelector(".timerRing");
+        const circle = ring?.querySelector("circle");
+        if (!ring || !circle) return;
+        ring.classList.remove("active");
+        circle.style.strokeDasharray = `${TIMER_CIRC}`;
+        circle.style.strokeDashoffset = `${TIMER_CIRC}`;
+      });
+      return;
+    }
+    const remaining = Math.max(0, deadline - Date.now());
+    const p = Math.max(0, Math.min(1, remaining / totalMs));
+    avatars.forEach((ava) => {
+      const role = ava.dataset.role;
+      const active = type === "lobby" ? true : (Array.isArray(activeRoles) ? activeRoles.includes(role) : role === activeRole);
+      const ring = ava.querySelector(".timerRing");
+      const circle = ring?.querySelector("circle");
+      if (!ring || !circle) return;
+      ring.classList.toggle("active", active);
+      circle.style.strokeDasharray = `${TIMER_CIRC}`;
+      circle.style.strokeDashoffset = `${TIMER_CIRC * (1 - (active ? p : 0))}`;
+    });
+  }
+
+  function shortenLabel(text, max = 15){
+    const str = (text || "").toString();
+    if (!str) return str;
+    if (str.startsWith("@")) {
+      const trimmed = "@" + str.slice(1, 16);
+      return trimmed.length >= str.length ? str : trimmed;
+    }
+    if (str.length <= max) return str;
+    return str.slice(0, Math.max(1, max - 1)) + "…";
+  }
+
+  function buildEnemyItem({ role, seat, prof, label, cardCount }) {
+    const e = document.createElement("div");
+    e.className = "enemy";
+
+    const wrap = document.createElement("div");
+    wrap.className = "avatarWrap";
+    wrap.dataset.role = role;
+    wrap.dataset.seat = typeof seat === "number" ? String(seat) : "";
+    const ring = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    ring.setAttribute("class", "timerRing");
+    ring.setAttribute("viewBox", "0 0 44 44");
+    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    circle.setAttribute("cx", "22");
+    circle.setAttribute("cy", "22");
+    circle.setAttribute("r", "20");
+    ring.appendChild(circle);
+    wrap.appendChild(ring);
+    const ava = document.createElement("div");
+    ava.className = "avatarInner";
+    if (prof.photoUrl) {
+      const img = document.createElement("img");
+      img.src = prof.photoUrl;
+      ava.appendChild(img);
+    } else {
+      ava.textContent = (prof.name || "P").slice(0,1).toUpperCase();
+    }
+    wrap.appendChild(ava);
+    const badge = document.createElement("div");
+    badge.className = "avatarBadge";
+    badge.textContent = "";
+    wrap.appendChild(badge);
+
+    const nm = document.createElement("div");
+    nm.className = "name";
+    nm.textContent = shortenLabel(label, 20);
+
+    e.appendChild(wrap);
+    e.appendChild(nm);
+
+    if (typeof cardCount === "number" && cardCount > 0) {
+      const cards = document.createElement("div");
+      cards.className = "cards";
+      for (let i = 0; i < cardCount; i++) {
+        const card = document.createElement("div");
+        card.className = "cardBack";
+        const angle = Math.min(12, Math.max(-12, (i - cardCount / 2) * 4));
+        card.style.transform = `rotate(${angle}deg)`;
+        cards.appendChild(card);
+      }
+      e.appendChild(cards);
+    }
+	e._avatar = ava;
+    e._avatarWrap = wrap;
+    e._badge = badge;
+    wrap.style.pointerEvents = "none";
+    return e;
+  }
+    // ===== Avatar emoji picker & FX
+  const ALLOWED_AVA_EMOJI = ["🤡","😎","😘"];
+  let openEmojiPickerEl = null;
+
+  function closeEmojiPicker(){
+    if (openEmojiPickerEl) {
+      openEmojiPickerEl.remove();
+      openEmojiPickerEl = null;
+    }
+  }
+
+  function openEmojiPickerNear(avatarEl, role){
+    closeEmojiPicker();
+    const wrap = document.createElement("div");
+    wrap.style.position = "absolute";
+    wrap.style.left = "50%";
+    wrap.style.top = "100%";
+    wrap.style.transform = "translate(-50%, 8px)";
+    wrap.style.display = "flex";
+    wrap.style.gap = "8px";
+    wrap.style.padding = "8px 10px";
+    wrap.style.borderRadius = "14px";
+    wrap.style.background = "rgba(0,0,0,.55)";
+    wrap.style.border = "1px solid rgba(255,255,255,.15)";
+    wrap.style.zIndex = "99999";
+    wrap.style.backdropFilter = "blur(6px)";
+    wrap.style.pointerEvents = "auto";
+
+    for (const em of ALLOWED_AVA_EMOJI) {
+      const b = document.createElement("button");
+      b.textContent = em;
+      b.className = "btn gray";
+      b.style.minWidth = "44px";
+      b.style.padding = "8px";
+      b.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        sendMsg({ type:"emoji", emoji: em });
+        closeEmojiPicker();
+      };
+      wrap.appendChild(b);
+    }
+
+    // к аватарке (у неё position:relative уже добавили в CSS)
+    avatarEl.appendChild(wrap);
+    openEmojiPickerEl = wrap;
+
+    // клик вне — закрыть
+    setTimeout(() => {
+      const onDoc = (ev) => {
+        if (!wrap.isConnected) { document.removeEventListener("pointerdown", onDoc, true); return; }
+        if (wrap.contains(ev.target) || avatarEl.contains(ev.target)) return;
+        closeEmojiPicker();
+        document.removeEventListener("pointerdown", onDoc, true);
+      };
+      document.addEventListener("pointerdown", onDoc, true);
+    }, 0);
+  }
+
+  function playAvatarEmoji({ seat, role, emoji }){
+    if (!emoji) return;
+    let ava = null;
+    if (Number.isFinite(seat)) {
+      ava = document.querySelector(`.avatarWrap[data-seat="${seat}"]`);
+    }
+    if (!ava && role) {
+      ava = document.querySelector(`.avatarWrap[data-role="${cssEscape(role)}"]`);
+    }
+    if (!ava) return;
+
+    const fx = document.createElement("div");
+    fx.className = "avatarEmojiFx";
+    fx.textContent = emoji;
+    ava.appendChild(fx);
+
+    const cleanup = () => {
+      try { fx.remove(); } catch {}
+    };
+    fx.addEventListener("animationend", cleanup, { once: true });
+    setTimeout(cleanup, 3200);
+  }
+
+  let lastFinishKey = null;
+  function applyEndBadges(st){
+    if (!st || st.phase !== "finished") return;
+    const key = JSON.stringify({ winners: st.winners || [], losers: st.losers || [], winnersSeat: st.winnersSeat || [], losersSeat: st.losersSeat || [], loserSeat: st.loserSeat ?? null, finishMode: st.finishMode || st.winMode });
+    if (key === lastFinishKey) return;
+    lastFinishKey = key;
+
+    document.querySelectorAll(".avatarBadge").forEach(n => { n.textContent = ""; });
+
+    const winnersSeat = Array.isArray(st.winnersSeat) ? st.winnersSeat.filter(Number.isFinite) : [];
+    let losersSeat = Array.isArray(st.losersSeat) ? st.losersSeat.filter(Number.isFinite) : [];
+    if (!losersSeat.length && Number.isFinite(st.loserSeat)) losersSeat = [st.loserSeat];
+
+    for (const seat of winnersSeat) {
+      const b = document.querySelector(`.avatarWrap[data-seat="${seat}"] .avatarBadge`);
+      if (b) b.textContent = "👑";
+    }
+    for (const seat of losersSeat) {
+      const b = document.querySelector(`.avatarWrap[data-seat="${seat}"] .avatarBadge`);
+      if (b) b.textContent = "💀";
+    }
+    const pb = st.payoutBreakdown?.perRole || {};
+    const currencyLabel = st.currency === "stars" ? "⭐" : "TON";
+    for (const role of Object.keys(pb)) {
+      const seat = st.roles.indexOf(role);
+      if (seat < 0) continue;
+      const node = document.querySelector(`.enemyItem[data-seat="${seat}"] .enemyName`);
+      if (!node) continue;
+      const gain = Number(pb[role].payout || 0) + Number(pb[role].refund || 0) - Number(pb[role].stake || 0);
+      if (Math.abs(gain) < 0.001) continue;
+      node.textContent += ` ${gain > 0 ? "+" : ""}${Math.round(gain * 100) / 100} ${currencyLabel}`;
+    }
+    try { localStorage.setItem("evil_last_result", JSON.stringify({ at: Date.now(), currency: st.currency, perRole: pb, youRole: st.youRole })); } catch {}
+  }
+
+  function cssEscape(s){
+    return String(s).replace(/["\\]/g, "\\$&");
+  }
+
+  function renderLobby(){
+    if (!lobbyState) return;
+    ready = false;
+    prevHandIds = new Set();
+    lastTableHadCards = false;
+    prevDiscardCount = null;
+    pendingDiscardAnimation = false;
+    lastFinishKey = null;
+
+    enemyRow.innerHTML = "";
+    for (const r of lobbyState.roles) {
+      const pl = lobbyState.players?.find(p => p.role === r);
+      if (!pl?.userKey) continue;
+
+      const prof = lobbyState.profiles?.[r] || { name:"", username:"", photoUrl:"" };
+      const label = (prof.username || prof.name || r) + (pl.ready ? " ✓" : "");
+      const seat = lobbyState.roles.indexOf(r);
+      const item = buildEnemyItem({ role: r, seat, prof, label });
+      if (r === lobbyState.youRole) {
+        item.classList.add("me");
+        if (item._avatarWrap) {
+          item._avatarWrap.onclick = (ev) => {
+            // disabled: avatar emoji picker in TG (prevents click issues)
+            ev.preventDefault();
+            ev.stopPropagation();
+            openEmojiPickerNear(item._avatarWrap, r);
+          };
+        }
+      }
+      enemyRow.appendChild(item);
+    }
+
+    pairs.innerHTML = "";
+    handEl.innerHTML = "";
+    transferZone.classList.remove("show");
+    renderDiscardPile(null);
+
+    const isStars = lobbyState.currency === "stars";
+    const ls = isStars ? `⭐ ${lobbyState.stake}` : `💎 ${lobbyState.stake}`;
+    statusEl.textContent = `Лобби: ${lobbyState.players.filter(p=>p.userKey).length}/${lobbyState.maxPlayers} • Ставка: ${ls}`;
+    if (stakeBadge) stakeBadge.textContent = ls;
+    if (modeBadges) {
+      modeBadges.innerHTML = "";
+      modeBadges.appendChild(buildModeIcons(lobbyState));
+      modeBadges.style.display = "flex";
+    }
+
+    const filled = lobbyState.players.filter(p=>p.userKey).length === lobbyState.maxPlayers;
+    if (!filled && ready) {
+      ready = false;
+      btnReady.textContent = "Готов";
+    }
+    btnReady.style.display = filled ? "inline-block" : "none";
+    btnTake.style.display = "none";
+    btnPass.style.display = "none";
+    btnEnd.style.display = "none";
+    btnExitLobby.style.display = "inline-block";
+    btnResign.style.display = "none";
+    btnInvite.style.display = "inline-block";
+
+    if (filled && lobbyReadyDeadlineTs && lobbyState.readyTimeoutMs) {
+      setTimerState({ type: "lobby", deadline: lobbyReadyDeadlineTs, totalMs: lobbyState.readyTimeoutMs });
+    } else {
+      setTimerState({ type: null });
+    }
+
+    renderSlotsForGame(null);
+  }
+
+  const trumpBadge = document.getElementById("trumpBadge");
+  const deckCount = document.getElementById("deckCount");
+  const discardPanel = document.getElementById("discardPanel");
+  const discardStack = document.getElementById("discardStack");
+
+  function renderDiscardPile(st){
+    const count = st?.discardCount ?? 0;
+    if (!discardPanel || !discardStack) return;
+    discardPanel.classList.toggle("show", count > 0);
+    discardStack.innerHTML = "";
+    if (count <= 0) return;
+    const layers = Math.min(6, Math.max(1, Math.ceil(count / 2)));
+    for (let i = 0; i < layers; i++) {
+      const card = document.createElement("div");
+      card.className = "discardCard";
+      card.style.left = `${i * 2}px`;
+      card.style.top = `${i * 2}px`;
+      card.style.transform = `rotate(${i * 2}deg)`;
+      discardStack.appendChild(card);
+    }
+  }
+
+  function renderGame(){
+    if (!gameState) return;
+
+        enemyRow.innerHTML = "";
+    const meRole = gameState.youRole;
+
+    for (const r of gameState.roles) {
+      const prof = gameState.profiles?.[r] || { name:"", username:"", photoUrl:"" };
+      const count = gameState.handsCount?.[r] ?? 0;
+      const takingDefender = gameState.phase === "taking" && gameState.takingReason === "take" && r === gameState.defender;
+      const label = `${prof.username || prof.name || r}${takingDefender ? " беру" : ""}`;
+      const seat = gameState.roles.indexOf(r);
+      const item = buildEnemyItem({ role: r, seat, prof, label, cardCount: count });
+
+      // кликается только своя ава
+      if (r === meRole) {
+        item.classList.add("me");
+        if (item._avatarWrap) {
+          item._avatarWrap.onclick = (ev) => {
+            // disabled: avatar emoji picker in TG (prevents click issues)
+            ev.preventDefault();
+            ev.stopPropagation();
+            openEmojiPickerNear(item._avatarWrap, r);
+          };
+        }
+      }
+
+      enemyRow.appendChild(item);
+    }
+
+
+    trumpBadge.textContent = gameState.trumpSuit || "?";
+    trumpBadge.className = "trumpBadge " + suitClass(gameState.trumpSuit);
+    deckCount.textContent = String(gameState.deckCount ?? 0);
+    renderDiscardPile(gameState);
+
+    const me = gameState.youRole;
+    const anyOnTable = (gameState.table || []).some(p => p);
+    const allDef = anyOnTable && (gameState.table || []).filter(Boolean).every(p => p.defend);
+
+    const gs = gameState.currency === "stars" ? `⭐ ${gameState.stake}` : `💎 ${gameState.stake}`;
+    const baseStatus = gameState.phase === "finished" ? "" : (gameState.activeRole === me ? "Ваш ход" : "");
+    statusEl.textContent = `${baseStatus}${baseStatus ? " • " : ""}Ставка: ${gs}`;
+    if (stakeBadge) stakeBadge.textContent = gs;
+    if (modeBadges) {
+      modeBadges.innerHTML = "";
+      modeBadges.style.display = "none";
+    }
+
+	btnPass.textContent = (gameState.phase === "taking" && gameState.throwInMode === "all") ? "БИТО" : "ПАС";
+    btnReady.style.display = "none";
+    btnTake.style.display = (gameState.phase !== "finished" && me === gameState.defender && anyOnTable && gameState.phase === "defend") ? "inline-block" : "none";
+    btnPass.style.display = (gameState.phase !== "finished" && gameState.phase === "taking" && me !== gameState.defender) ? "inline-block" : "none";
+    btnEnd.style.display  = (gameState.phase !== "finished" && me === gameState.attacker && gameState.phase === "attack" && allDef) ? "inline-block" : "none";
+    btnExitLobby.style.display = "none";
+    btnResign.style.display = (gameState.phase !== "finished") ? "inline-block" : "none";
+    btnInvite.style.display = "none";
+
+    if (typeof prevDiscardCount === "number" && typeof gameState.discardCount === "number") {
+      pendingDiscardAnimation = gameState.discardCount > prevDiscardCount;
+    }
+    renderSlotsForGame(gameState);
+    renderTransferZone(gameState);
+    renderHand(gameState);
+    renderFinish(gameState);
+    if (gameState.phase !== "finished") {
+      lastFinishKey = null;
+      document.querySelectorAll(".avatarBadge").forEach(n => { n.textContent = ""; });
+    }
+	applyEndBadges(gameState);
+
+
+    if (gameState.deadlineTs && gameState.turnMs) {
+      const activeRoles = gameState.phase === "taking"
+        ? (gameState.attackers || []).filter(r => !(gameState.takingPass && gameState.takingPass[r]))
+        : null;
+      setTimerState({
+        type: "game",
+        deadline: gameState.deadlineTs,
+        totalMs: gameState.turnMs,
+        activeRole: gameState.activeRole,
+        activeRoles
+      });
+    } else {
+      setTimerState({ type: null });
+    }
+    prevDiscardCount = gameState.discardCount ?? prevDiscardCount;
+  }
+
+  // ===== Finish overlay
+  const resultOverlay = document.getElementById("resultOverlay");
+  const resultTitle = document.getElementById("resultTitle");
+  const resultMsg = document.getElementById("resultMsg");
+  const btnToMenu = document.getElementById("btnToMenu");
+
+  btnToMenu.onclick = () => {
+    resultOverlay.classList.remove("show");
+    // остаёмся в фуллскрине, но если после игры лобби неполное - оно появится в списках
+    // пользователь может выйти из лобби кнопкой "Выйти (лобби)"
+  };
+
+    function renderFinish(st){
+    // Оверлей результата полностью отключён (корона/череп рисуются над аватарками)
+    try { resultOverlay.classList.remove("show"); } catch {}
+    return;
+  }
+
+
+  // ===== DnD helpers
+  let dragCtx = null; // { card, el }
+  let touchDrag = null; // { card, originEl, ghostEl, moved }
+  const TOUCH_DRAG_THRESHOLD = 4;
+
+  function isPlayable(card){
+    const st = gameState;
+    if (!st) return false;
+    if (st.phase === "finished") return false;
+    return true; // server validates anyway; client only hints
+  }
+
+  function getNextRole(st, role){
+    if (!st?.roles?.length || !role) return role;
+    const idx = st.roles.indexOf(role);
+    if (idx === -1) return role;
+    return st.roles[(idx + 1) % st.roles.length];
+  }
+
+  function canDropToSlot(slotIndex, card){
+    const st = gameState;
+    if (!st) return false;
+    const me = st.youRole;
+    const slot = st.table?.[slotIndex] || null;
+
+    if (me === st.defender) {
+      if (st.phase !== "defend") return false;
+      if (!slot || !slot.attack || slot.defend) return false;
+      return true;
+    }
+
+    if (!(st.phase === "attack" || st.phase === "defend" || st.phase === "taking")) return false;
+    if (st.phase === "taking") {
+      if (st.takingPass?.[me]) return false;
+      if (st.takingReason === "bito" && me !== st.attacker && !st.takingLeaderPassed) return false;
+    }
+    const defenderHand = st.handsCount?.[st.defender] ?? 0;
+    const defendedCount = (st.table || []).filter(p => p && p.defend).length;
+    const roundPairsLimit = st.roundIndex === 1 ? 5 : 6;
+    const maxPairs = Math.min(roundPairsLimit, defenderHand + defendedCount);
+    if (maxPairs <= 0) return false;
+    if (st.table.filter(Boolean).length >= maxPairs) return false;
+    const anyOnTable = (st.table || []).some(p => p && p.attack);
+    if (!anyOnTable) return me === st.attacker;
+    const ranks = new Set();
+    for (const p of st.table || []) {
+      if (p?.attack) ranks.add(p.attack.rank);
+      if (p?.defend) ranks.add(p.defend.rank);
+    }
+    return ranks.has(card.rank);
+  }
+
+  function canDropToTransfer(card){
+    const st = gameState;
+    if (!st) return false;
+    if (!st.allowTransfer) return false;
+    if (st.youRole !== st.defender) return false;
+    if (st.phase !== "defend") return false;
+
+    const anyAttack = (st.table || []).some(p => p && p.attack);
+    const anyDef = (st.table || []).some(p => p && p.defend);
+    if (!anyAttack || anyDef) return false;
+
+    const ranks = new Set();
+    for (const p of st.table) if (p?.attack) ranks.add(p.attack.rank);
+    return ranks.has(card.rank);
+  }
+
+  function doDrop(slotIndex, card){
+    const st = gameState;
+    if (!st) return;
+    const me = st.youRole;
+    const slot = st.table?.[slotIndex] || null;
+
+    if (me === st.defender) {
+      const targetAttackId = slot.attack.id;
+      sendMsg({ type:"action", action:{ kind:"defend", cardId: card.id, targetAttackId } });
+    } else {
+      sendMsg({ type:"action", action:{ kind:"attack", cardId: card.id } });
+    }
+  }
+
+  function doTransfer(card){
+    sendMsg({ type:"action", action:{ kind:"transfer", cardId: card.id } });
+  }
+
+  function setLift(el, on){
+    el.classList.toggle("lift", !!on);
+  }
+
+  function enableDesktopDnD(el, card){
+    el.addEventListener("dragstart", (e) => {
+      if (!isPlayable(card)) { e.preventDefault(); return; }
+      dragCtx = { card, el };
+
+      // cursor behavior like "move", not copy-image
+      try {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.dropEffect = "move";
+      } catch {}
+
+      const ghost = el.cloneNode(true);
+      ghost.style.position = "fixed";
+      ghost.style.top = "-1000px";
+      ghost.style.left = "-1000px";
+      ghost.style.transform = "none";
+      ghost.style.margin = "0";
+      document.body.appendChild(ghost);
+      try { e.dataTransfer.setDragImage(ghost, ghost.offsetWidth/2, ghost.offsetHeight/2); } catch {}
+      setTimeout(()=>ghost.remove(), 0);
+    });
+
+    el.addEventListener("dragend", () => {
+      dragCtx = null;
+      document.querySelectorAll(".pair").forEach(p => p.classList.remove("drop-ok","drop-bad"));
+      transferZone.classList.remove("drop-ok","drop-bad");
+    });
+  }
+
+function enableTouchDrag(el, card){
+    el.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch") return;
+      if (!isPlayable(card)) return;
+      e.preventDefault();
+      try { el.setPointerCapture(e.pointerId); } catch {}
+
+      const startX = e.clientX, startY = e.clientY;
+      let moved = false;
+
+      touchDrag = { card, originEl: el, ghostEl: null, startX, startY, moved:false, lastX: startX, lastY: startY, pointerId: e.pointerId };
+
+      const onMove = (ev) => {
+        if (!touchDrag) return;
+        if (ev.pointerId !== touchDrag.pointerId) return;
+        ev.preventDefault();
+        const dx = Math.abs(ev.clientX - startX);
+        const dy = Math.abs(ev.clientY - startY);
+        if (dx + dy > TOUCH_DRAG_THRESHOLD) moved = true;
+        touchDrag.lastX = ev.clientX;
+        touchDrag.lastY = ev.clientY;
+        if (moved && !touchDrag.ghostEl) {
+          const ghost = el.cloneNode(true);
+          ghost.classList.add("ghost");
+          ghost.style.left = ev.clientX + "px";
+          ghost.style.top  = ev.clientY + "px";
+          document.body.appendChild(ghost);
+          touchDrag.ghostEl = ghost;
+          el.style.opacity = "0.25";
+        }
+        if (touchDrag.ghostEl) {
+          touchDrag.ghostEl.style.left = ev.clientX + "px";
+          touchDrag.ghostEl.style.top  = ev.clientY + "px";
+        }
+
+        document.querySelectorAll(".pair").forEach(p => p.classList.remove("drop-ok","drop-bad"));
+        transferZone.classList.remove("drop-ok","drop-bad");
+
+        const elUnder = document.elementFromPoint(ev.clientX, ev.clientY);
+        const slot = elUnder?.closest?.(".pair");
+        if (slot && touchDrag) {
+          const idx = Number(slot.dataset.slot);
+          const ok = canDropToSlot(idx, touchDrag.card);
+          slot.classList.toggle("drop-ok", ok);
+          slot.classList.toggle("drop-bad", !ok);
+        } else {
+          const tz = elUnder?.closest?.("#transferZone");
+          if (tz && transferZone.classList.contains("show")) {
+            const ok = canDropToTransfer(touchDrag.card);
+            transferZone.classList.toggle("drop-ok", ok);
+            transferZone.classList.toggle("drop-bad", !ok);
+          }
+        }
+      };
+
+		const onUp = (ev) => {
+        if (touchDrag && ev.pointerId !== touchDrag.pointerId) return;
+        ev.preventDefault();
+        window.removeEventListener("pointermove", onMove, true);
+        window.removeEventListener("pointerup", onUp, true);
+        window.removeEventListener("pointercancel", onUp, true);
+
+        const td = touchDrag;
+        touchDrag = null;
+
+        document.querySelectorAll(".pair").forEach(p => p.classList.remove("drop-ok","drop-bad"));
+        transferZone.classList.remove("drop-ok","drop-bad");
+
+		if (!td) return;
+        try { td.originEl.releasePointerCapture(td.pointerId); } catch {}
+        td.originEl.style.opacity = "1";
+        if (td.ghostEl) td.ghostEl.remove();
+
+        if (!moved) {
+          const had = td.originEl.classList.contains("lift");
+          document.querySelectorAll("#hand .card").forEach(c => c.classList.remove("lift"));
+          td.originEl.classList.toggle("lift", !had);
+          return;
+        }
+
+        const dropX = td.lastX ?? ev.clientX;
+        const dropY = td.lastY ?? ev.clientY;
+        const under = document.elementFromPoint(dropX, dropY);
+        const slot = under?.closest?.(".pair");
+        if (slot) {
+          const idx = Number(slot.dataset.slot);
+          const ok = canDropToSlot(idx, td.card);
+          if (ok) doDrop(idx, td.card);
+          return;
+        }
+
+        const tz = under?.closest?.("#transferZone");
+        if (tz && transferZone.classList.contains("show")) {
+          const ok = canDropToTransfer(td.card);
+          if (ok) doTransfer(td.card);
+        }
+      };
+
+      window.addEventListener("pointermove", onMove, true);
+      window.addEventListener("pointerup", onUp, true);
+      window.addEventListener("pointercancel", onUp, true);
+    });
+  }
+
+  // ===== Hand sorting (as before)
+  const suitOrder = ["♣","♦","♥","♠"];
+  const rankOrder = new Map([[6,0],[7,1],[8,2],[9,3],[10,4],["J",5],["Q",6],["K",7],["A",8]]);
+  function sortHand(cards, trumpSuit){
+    const nonTrump = cards.filter(c => c.suit !== trumpSuit);
+    const trump = cards.filter(c => c.suit === trumpSuit);
+
+    nonTrump.sort((a,b)=>{
+      const sa = suitOrder.indexOf(a.suit), sb = suitOrder.indexOf(b.suit);
+      if (sa !== sb) return sa - sb;
+      return (rankOrder.get(a.rank) ?? 0) - (rankOrder.get(b.rank) ?? 0);
+    });
+    trump.sort((a,b)=> (rankOrder.get(a.rank) ?? 0) - (rankOrder.get(b.rank) ?? 0));
+    return nonTrump.concat(trump);
+  }
+
+  let prevHandIds = new Set();
+  function renderHand(st){
+    const sorted = sortHand(st.yourHand || [], st.trumpSuit);
+    handEl.innerHTML = "";
+    handEl.classList.toggle("fan", sorted.length > 6);
+
+    for (const c of sorted){
+      const el = makeCardFace(c);
+      if (!prevHandIds.has(c.id)) el.classList.add("deal-in");
+      el.classList.toggle("playable", true);
+
+      el.addEventListener("pointerup", (e) => {
+        if (e.pointerType !== "mouse") return;
+        if (dragCtx) return;
+        const had = el.classList.contains("lift");
+        document.querySelectorAll("#hand .card").forEach(c => c.classList.remove("lift"));
+        el.classList.toggle("lift", !had);
+      });
+
+      enableDesktopDnD(el, c);
+      enableTouchDrag(el, c);
+
+      handEl.appendChild(el);
+    }
+    prevHandIds = new Set(sorted.map(c => c.id));
+  }
+
+  function renderTransferZone(st){
+    if (!st || st.phase === "finished") { transferZone.classList.remove("show"); return; }
+    const show = !!st.allowTransfer && st.youRole === st.defender && st.phase === "defend"
+      && (st.table || []).some(p => p && p.attack)
+      && !(st.table || []).some(p => p && p.defend);
+    const ranks = new Set();
+    for (const p of st.table || []) if (p?.attack) ranks.add(p.attack.rank);
+    const canTransferCard = (st.yourHand || []).some(card => ranks.has(card.rank));
+    const shouldShow = show && canTransferCard;
+
+    transferZone.classList.toggle("show", shouldShow);
+    if (shouldShow) {
+      const slots = Array.from(document.querySelectorAll(".pair"));
+      const firstEmpty = slots.find((slot) => {
+        const idx = Number(slot.dataset.slot);
+        return !(st.table && st.table[idx]);
+      });
+      if (firstEmpty) {
+        const slotRect = firstEmpty.getBoundingClientRect();
+        const tableRect = document.getElementById("table").getBoundingClientRect();
+        transferZone.style.left = `${slotRect.left - tableRect.left + slotRect.width / 2}px`;
+        transferZone.style.top = `${slotRect.top - tableRect.top + slotRect.height / 2}px`;
+        transferZone.style.width = `${slotRect.width}px`;
+        transferZone.style.height = `${slotRect.height}px`;
+      }
+    }
+
+    // Desktop DnD on transfer zone
+    transferZone.ondragover = (e) => {
+      if (!dragCtx) return;
+      e.preventDefault();
+      const ok = canDropToTransfer(dragCtx.card);
+      transferZone.classList.toggle("drop-ok", ok);
+      transferZone.classList.toggle("drop-bad", !ok);
+    };
+    transferZone.ondragleave = () => transferZone.classList.remove("drop-ok","drop-bad");
+    transferZone.ondrop = (e) => {
+      if (!dragCtx) return;
+      e.preventDefault();
+      const ok = canDropToTransfer(dragCtx.card);
+      if (ok) doTransfer(dragCtx.card);
+      transferZone.classList.remove("drop-ok","drop-bad");
+      dragCtx = null;
+    };
+  }
+
+  let lastTableHadCards = false;
+  let pendingDiscardAnimation = false;
+  let prevDiscardCount = null;
+  function animateDiscardFromTable(){
+    const cards = Array.from(pairs.querySelectorAll(".card"));
+    if (!cards.length) return;
+    const targetRect = discardPanel?.classList.contains("show")
+      ? discardStack.getBoundingClientRect()
+      : null;
+    for (const card of cards) {
+      const rect = card.getBoundingClientRect();
+      const ghost = card.cloneNode(true);
+      ghost.classList.add("discardGhost");
+      ghost.style.left = rect.left + "px";
+      ghost.style.top = rect.top + "px";
+      ghost.style.width = rect.width + "px";
+      ghost.style.height = rect.height + "px";
+      if (targetRect) {
+        const targetX = targetRect.left + targetRect.width / 2;
+        const targetY = targetRect.top + targetRect.height / 2;
+        ghost.style.setProperty("--dx", `${targetX - rect.left}px`);
+        ghost.style.setProperty("--dy", `${targetY - rect.top}px`);
+      }
+      document.body.appendChild(ghost);
+      ghost.addEventListener("animationend", () => ghost.remove());
+    }
+  }
+
+  // ===== Table slots
+  function renderSlotsForGame(st){
+    const hasNow = !!(st && st.table && st.table.some(p => p));
+    if (pendingDiscardAnimation && lastTableHadCards && !hasNow) {
+      animateDiscardFromTable();
+    }
+    pairs.innerHTML = "";
+    for (let i=0;i<6;i++){
+      const slot = document.createElement("div");
+      slot.className = "pair";
+      slot.dataset.slot = String(i);
+
+      if (st && st.table && st.table[i]) {
+        const pair = st.table[i];
+        if (pair.attack) {
+          const a = makeCardFace(pair.attack);
+          a.draggable = false;
+          a.style.cursor = "default";
+          slot.appendChild(a);
+        }
+        if (pair.defend) {
+          const d = makeCardFace(pair.defend);
+          d.draggable = false;
+          d.style.cursor = "default";
+          d.style.position = "absolute";
+          d.style.right = "6px";
+          d.style.bottom = "6px";
+          d.style.transform = "rotate(8deg)";
+          slot.appendChild(d);
+        }
+      }
+
+      slot.addEventListener("dragover", (e) => {
+        if (!dragCtx) return;
+        e.preventDefault();
+        const ok = canDropToSlot(i, dragCtx.card);
+        slot.classList.toggle("drop-ok", ok);
+        slot.classList.toggle("drop-bad", !ok);
+      });
+      slot.addEventListener("dragleave", () => slot.classList.remove("drop-ok","drop-bad"));
+      slot.addEventListener("drop", (e) => {
+        if (!dragCtx) return;
+        e.preventDefault();
+        const ok = canDropToSlot(i, dragCtx.card);
+        if (ok) doDrop(i, dragCtx.card);
+        slot.classList.remove("drop-ok","drop-bad");
+        dragCtx = null;
+      });
+
+      pairs.appendChild(slot);
+    }
+    lastTableHadCards = hasNow;
+    pendingDiscardAnimation = false;
+  }
+
+  // ===== Errors
+  function showError(text){
+    errCreate.textContent = text;
+    errPublic.textContent = text;
+    errPrivate.textContent = text;
+    // profile screen doesn't show errors to avoid extra hints
+  }
+
+
+  const urlJoinId = new URLSearchParams(location.search).get("join") || "";
+  const tgStart = tg?.initDataUnsafe?.start_param || "";
+  const startJoin = tgStart.startsWith("join_") ? tgStart.slice(5) : tgStart;
+  const deepJoinRoom = urlJoinId || startJoin;
+  if (deepJoinRoom) {
+    roomId = deepJoinRoom;
+    localStorage.setItem("evil_roomId", roomId);
+    joinAttemptSource = "manual";
+    setTimeout(() => sendMsg({ type:"join_lobby", userKey, profile, roomId }), 700);
+  }
+
+  // ===== Auto rejoin (silent)
+  setTimeout(() => {
+    if (!roomId) return;
+    if (localStorage.getItem("evil_in_game") !== "1") return;
+    joinAttemptSource = "auto";
+    sendMsg({ type:"join_lobby", userKey, profile, roomId, password: roomPass || "" });
+  }, 900);
+
+</script>
+</body>
+</html>

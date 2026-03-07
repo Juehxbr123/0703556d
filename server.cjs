@@ -531,10 +531,6 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(manifest));
     return;
   }
-  if (req.method === "GET" && (pathname === "/health" || API_PREFIXES.some(prefix => pathname === `${prefix}/health`))) {
-    writeJson(res, 200, { ok: true, uptime: Math.round(process.uptime()) });
-    return;
-  }
   if (API_PREFIXES.some(prefix => pathname.startsWith(prefix + "/"))) {
     writeJson(res, 404, { ok: false, error: "not_found", path: pathname });
     return;

@@ -1185,7 +1185,7 @@
 
   const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
   const API_ORIGIN = (window.__API_ORIGIN__ || localStorage.getItem("evil_api_origin") || "").trim();
-  const API_PREFIX_RAW = (window.__API_PREFIX__ || localStorage.getItem("evil_api_prefix") || "").trim();
+  const API_PREFIX_RAW = (window.__API_PREFIX__ || localStorage.getItem("evil_api_prefix") || "/api").trim();
 
   function normalizePrefix(v) {
     const raw = String(v || "").trim();
@@ -1696,8 +1696,8 @@
     const clean = String(url || "").startsWith("/") ? String(url) : `/${url}`;
     const candidates = [];
     if (/^\/pay\//.test(clean)) {
-      candidates.push(buildApiPath(clean, ""));
       for (const pref of API_PREFIXES) candidates.push(buildApiPath(clean, pref));
+      candidates.push(buildApiPath(clean, ""));
     } else {
       for (const pref of API_PREFIXES) candidates.push(buildApiPath(clean, pref));
       candidates.push(buildApiPath(clean, ""));

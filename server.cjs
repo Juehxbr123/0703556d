@@ -1,7 +1,10 @@
+const path = require("path");
+const dotenv = require("dotenv");
+dotenv.config({ path: path.join(__dirname, ".env") });
+
 const { WebSocketServer } = require("ws");
 const http = require("http");
 const fs = require("fs");
-const path = require("path");
 
 const PORT = Number(process.env.PORT || 3000);
 const TURN_MS = 30000;
@@ -234,7 +237,12 @@ function logRoute(kind, req, apiPath, status, reason = "", matchedRoute = "") {
   const rawPath = getRawPathname(req?.url);
   const matched = matchedRoute || apiPath || path;
   const suffix = reason ? ` reason=${reason}` : "";
-  console.info(`[${kind}] method=${req?.method || "-"} rawPath=${rawPath} path=${path} apiPath=${apiPath} matched=${matched} status=${status}${suffix}`);
+  const ua = String(req?.headers?.["user-agent"] || "-");
+  const referer = String(req?.headers?.referer || "-");
+  const origin = String(req?.headers?.origin || "-");
+  const fetchMode = String(req?.headers?.["sec-fetch-mode"] || "-");
+  const fetchDest = String(req?.headers?.["sec-fetch-dest"] || "-");
+  console.info(`[${kind}] method=${req?.method || "-"} rawPath=${rawPath} path=${path} apiPath=${apiPath} matched=${matched} status=${status}${suffix} ua=${JSON.stringify(ua)} referer=${JSON.stringify(referer)} origin=${JSON.stringify(origin)} secFetchMode=${fetchMode} secFetchDest=${fetchDest}`);
 }
 
 function getRequestPath(reqUrl) {
@@ -282,7 +290,7 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "OPTIONS" && (PAYMENT_ROUTES.has(apiPath) || API_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(prefix + "/")))) {
     logRoute("api", req, apiPath, 204, "preflight");
-    res.writeHead(204, withCorsHeaders(req));
+    res.writeHead(204, withCorsHeaders(req, { "X-Durak-Backend": "node" }));
     res.end();
     return;
   }
@@ -581,7 +589,15 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && staticDef) {
     const filePath = path.join(__dirname, staticDef.file);
     if (fs.existsSync(filePath)) {
-      res.writeHead(200, { "Content-Type": staticDef.type, "Cache-Control": "no-cache" });
+      const staticHeaders = { "Content-Type": staticDef.type, "X-Durak-Backend": "node" };
+      if (pathname === "/" || pathname === "/index.html") {
+        staticHeaders["Cache-Control"] = "no-store, no-cache, must-revalidate";
+        staticHeaders.Pragma = "no-cache";
+        staticHeaders.Expires = "0";
+      } else {
+        staticHeaders["Cache-Control"] = "no-cache";
+      }
+      res.writeHead(200, staticHeaders);
       fs.createReadStream(filePath).pipe(res);
       return;
     }

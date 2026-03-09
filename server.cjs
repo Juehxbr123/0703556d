@@ -10,6 +10,7 @@ const FINISH_TO_LOBBY_MS = 4500;
 const READY_MS = 15000;
 const DEFAULT_STAKE = 1;
 const DEFAULT_CURRENCY = "ton";
+const TON_ORDER_TTL_MS = 15 * 60 * 1000;
 
 const PUBLIC_BASE_URL = "https://durak.clown-on-stonks.fun";
 
@@ -122,7 +123,8 @@ function pushBalanceToUser(userId) {
 }
 
 function normalizeCurrency(v) {
-  const c = String(v || "").toLowerCase();
+  const c = String(v || "").toLowerCase().trim();
+  if (c === "xtr") return "stars";
   return c === "stars" ? "stars" : (c === "ton" ? "ton" : null);
 }
 
@@ -158,6 +160,45 @@ function parseApiPrefixes() {
 }
 
 const API_PREFIXES = parseApiPrefixes();
+
+const STATIC_FILES = {
+  "/": { file: "index.html", type: "text/html; charset=utf-8" },
+  "/index.html": { file: "index.html", type: "text/html; charset=utf-8" },
+  "/icon.svg": { file: "icon.svg", type: "image/svg+xml" }
+};
+
+function getApiPrefixForPath(pathname) {
+  const clean = String(pathname || "/").replace(/\/+$/, "") || "/";
+  for (const prefix of API_PREFIXES) {
+    if (clean === prefix || clean.startsWith(prefix + "/")) return prefix;
+  }
+  return "";
+}
+
+function withCorsHeaders(req, headers = {}, methods = "POST, OPTIONS") {
+  const origin = req?.headers?.origin || "*";
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": methods,
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Vary": "Origin",
+    ...headers
+  };
+}
+
+function sendApiJson(req, res, code, data, extraHeaders = {}) {
+  const prefix = getApiPrefixForPath(getRequestPath(req.url));
+  writeJson(res, code, data, withCorsHeaders(req, {
+    "X-Api-Prefix": prefix || "/",
+    ...extraHeaders
+  }));
+}
+
+function logRoute(kind, req, apiPath, status, reason = "") {
+  const path = getRequestPath(req?.url);
+  const suffix = reason ? ` reason=${reason}` : "";
+  console.info(`[${kind}] ${req?.method || "-"} path=${path} apiPath=${apiPath} status=${status}${suffix}`);
+}
 
 function getRequestPath(reqUrl) {
   try {
@@ -202,19 +243,16 @@ const server = http.createServer((req, res) => {
   const pathname = getRequestPath(req.url);
   const apiPath = toApiPath(pathname);
 
-  if (PAYMENT_ROUTES.has(apiPath) && req.method === "OPTIONS") {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": req.headers.origin || "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type"
-    });
+  if (req.method === "OPTIONS" && (PAYMENT_ROUTES.has(apiPath) || API_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(prefix + "/")))) {
+    logRoute("api", req, apiPath, 204, "preflight");
+    res.writeHead(204, withCorsHeaders(req));
     res.end();
     return;
   }
 
   if (PAYMENT_ROUTES.has(apiPath) && req.method !== "POST") {
-    console.info("[pay] method mismatch", req.method, pathname);
-    writeJson(res, 405, { ok: false, error: "method_not_allowed", method: req.method, allow: ["POST"] }, { Allow: "POST" });
+    logRoute("pay", req, apiPath, 405, "method_not_allowed");
+    sendApiJson(req, res, 405, { ok: false, error: "method_not_allowed", method: req.method, allow: ["POST"] }, { Allow: "POST" });
     return;
   }
 
@@ -225,26 +263,23 @@ const server = http.createServer((req, res) => {
       try {
         const payload = JSON.parse(body || "{}");
         if (!process.env.ADMIN_SECRET || payload.secret !== process.env.ADMIN_SECRET) {
-          res.writeHead(403, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+          sendApiJson(req, res, 403, { ok: false, error: "forbidden" });
           return;
         }
         const userId = safeStr(payload.userId || "", 128);
         const currency = normalizeCurrency(payload.currency);
         const amount = Number(payload.amount);
         if (!userId || !currency || !Number.isFinite(amount) || amount <= 0) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "bad_payload" }));
+          sendApiJson(req, res, 400, { ok: false, error: "bad_payload" });
           return;
         }
         ensureUserBalance(userId).balances[currency] = roundMoney(ensureUserBalance(userId).balances[currency] + amount);
         saveStoreAtomic(balanceStore);
         pushBalanceToUser(userId);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, balances: getBalances(userId) }));
+        logRoute("admin", req, apiPath, 200, "topup_ok");
+        sendApiJson(req, res, 200, { ok: true, balances: getBalances(userId) });
       } catch (e) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "bad_json" }));
+        sendApiJson(req, res, 400, { ok: false, error: "bad_json" });
       }
     });
     return;
@@ -256,38 +291,32 @@ const server = http.createServer((req, res) => {
       try {
         const payload = JSON.parse(body || "{}");
         if (!process.env.ADMIN_SECRET || payload.secret !== process.env.ADMIN_SECRET) {
-          res.writeHead(403, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+          sendApiJson(req, res, 403, { ok: false, error: "forbidden" });
           return;
         }
         const currency = normalizeCurrency(payload.currency);
         const amount = Number(payload.amount);
         const username = String(payload.username || "").replace(/^@/, "").trim().toLowerCase();
         if (!username || !currency || !Number.isFinite(amount) || amount <= 0) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "bad_payload" }));
+          sendApiJson(req, res, 400, { ok: false, error: "bad_payload" });
           return;
         }
         const matched = Object.keys(balanceStore.users).filter(uid => String(balanceStore.users[uid]?.username || "") === username);
         if (matched.length === 0) {
-          res.writeHead(404, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "user_not_found" }));
+          sendApiJson(req, res, 404, { ok: false, error: "user_not_found" });
           return;
         }
         if (matched.length > 1) {
-          res.writeHead(409, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "ambiguous_username" }));
+          sendApiJson(req, res, 409, { ok: false, error: "ambiguous_username" });
           return;
         }
         const userId = matched[0];
         ensureUserBalance(userId).balances[currency] = roundMoney(ensureUserBalance(userId).balances[currency] + amount);
         saveStoreAtomic(balanceStore);
         pushBalanceToUser(userId);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, userId, balances: getBalances(userId) }));
+        sendApiJson(req, res, 200, { ok: true, userId, balances: getBalances(userId) });
       } catch (e) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "bad_json" }));
+        sendApiJson(req, res, 400, { ok: false, error: "bad_json" });
       }
     });
     return;
@@ -300,16 +329,15 @@ const server = http.createServer((req, res) => {
     req.on("end", async () => {
       try {
         if (!process.env.BOT_TOKEN) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "bot_token_missing" }));
+          logRoute("pay", req, apiPath, 500, "bot_token_missing");
+          sendApiJson(req, res, 500, { ok: false, error: "bot_token_missing", message: "Не настроен BOT_TOKEN на сервере" });
           return;
         }
         const payload = JSON.parse(body || "{}");
         const userId = safeStr(payload.userId || "", 128);
         const stars = Number(payload.stars);
         if (!userId || !Number.isInteger(stars) || stars < 1) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "bad_payload" }));
+          sendApiJson(req, res, 400, { ok: false, error: "bad_payload" });
           return;
         }
         const nonce = randId("N");
@@ -327,16 +355,15 @@ const server = http.createServer((req, res) => {
         });
         const j = await r.json();
         if (!j.ok || !j.result) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "tg_create_invoice_failed" }));
+          logRoute("pay", req, apiPath, 500, "tg_create_invoice_failed");
+          sendApiJson(req, res, 500, { ok: false, error: "tg_create_invoice_failed", message: "Telegram createInvoiceLink вернул ошибку" });
           return;
         }
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, url: j.result }));
+        logRoute("pay", req, apiPath, 200, "stars_link_ok");
+        sendApiJson(req, res, 200, { ok: true, url: j.result });
       } catch (e) {
         console.error("[pay] stars link error", e?.message || e);
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "bad_json" }));
+        sendApiJson(req, res, 400, { ok: false, error: "bad_json" });
       }
     });
     return;
@@ -349,29 +376,28 @@ const server = http.createServer((req, res) => {
     req.on("end", () => {
       try {
         if (!process.env.TON_RECEIVER) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "ton_receiver_missing" }));
+          logRoute("pay", req, apiPath, 500, "ton_receiver_missing");
+          sendApiJson(req, res, 500, { ok: false, error: "ton_receiver_missing", message: "Не настроен TON_RECEIVER на сервере" });
           return;
         }
         const payload = JSON.parse(body || "{}");
         const userId = safeStr(payload.userId || "", 128);
         const ton = Number(payload.ton);
         if (!userId || !Number.isFinite(ton) || ton < 0.1) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "bad_payload" }));
+          sendApiJson(req, res, 400, { ok: false, error: "bad_payload" });
           return;
         }
         const orderId = randId("TON");
         const amountNano = String(BigInt(Math.round(ton * 1e9)));
         const comment = `EVILTOPUP:${orderId}:${userId}`;
-        ordersStore.orders[orderId] = { orderId, userId, ton, amountNano, comment, status: "pending", createdAt: now(), txHash: null };
+        const payloadB64 = Buffer.from(comment, "utf8").toString("base64");
+        ordersStore.orders[orderId] = { orderId, userId, ton, amountNano, comment, payloadB64, status: "pending", createdAt: now(), txHash: null };
         saveOrdersAtomic(ordersStore);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, orderId, to: process.env.TON_RECEIVER, amountNano, comment }));
+        logRoute("pay", req, apiPath, 200, "ton_order_created");
+        sendApiJson(req, res, 200, { ok: true, orderId, to: process.env.TON_RECEIVER, amountNano, comment, payload: payloadB64 });
       } catch (e) {
         console.error("[pay] ton order error", e?.message || e);
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "bad_json" }));
+        sendApiJson(req, res, 400, { ok: false, error: "bad_json" });
       }
     });
     return;
@@ -384,13 +410,13 @@ const server = http.createServer((req, res) => {
     req.on("end", async () => {
       try {
         if (!process.env.TON_RECEIVER) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "ton_receiver_missing" }));
+          logRoute("pay", req, apiPath, 500, "ton_receiver_missing");
+          sendApiJson(req, res, 500, { ok: false, error: "ton_receiver_missing", message: "Не настроен TON_RECEIVER на сервере" });
           return;
         }
         if (!process.env.TONCENTER_API_KEY) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "toncenter_api_key_missing" }));
+          logRoute("pay", req, apiPath, 500, "toncenter_api_key_missing");
+          sendApiJson(req, res, 500, { ok: false, error: "toncenter_api_key_missing", message: "Не настроен TONCENTER_API_KEY на сервере" });
           return;
         }
         const payload = JSON.parse(body || "{}");
@@ -398,13 +424,18 @@ const server = http.createServer((req, res) => {
         const userId = safeStr(payload.userId || "", 128);
         const ord = ordersStore.orders[orderId];
         if (!ord || ord.userId !== userId) {
-          res.writeHead(404, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "not_found" }));
+          sendApiJson(req, res, 404, { ok: false, error: "not_found" });
+          return;
+        }
+        if ((now() - Number(ord.createdAt || 0)) > TON_ORDER_TTL_MS && ord.status === "pending") {
+          ord.status = "expired";
+          saveOrdersAtomic(ordersStore);
+          sendApiJson(req, res, 410, { ok: false, error: "order_expired", message: "Срок ожидания платежа истек. Создайте новый счет." });
           return;
         }
         if (ord.status === "paid") {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true, balances: getBalances(userId), alreadyPaid: true }));
+          logRoute("pay", req, apiPath, 200, "ton_already_paid");
+          sendApiJson(req, res, 200, { ok: true, balances: getBalances(userId), alreadyPaid: true });
           return;
         }
 
@@ -426,14 +457,13 @@ const server = http.createServer((req, res) => {
           }
         }
         if (!foundHash) {
-          res.writeHead(404, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "not_found" }));
+          sendApiJson(req, res, 404, { ok: false, error: "not_found" });
           return;
         }
         const duplicate = Object.values(ordersStore.orders).find(o => o && o.status === "paid" && o.txHash === foundHash);
         if (duplicate) {
-          res.writeHead(409, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "already_used_tx" }));
+          logRoute("pay", req, apiPath, 409, "already_used_tx");
+          sendApiJson(req, res, 409, { ok: false, error: "already_used_tx" });
           return;
         }
         ord.status = "paid";
@@ -443,12 +473,11 @@ const server = http.createServer((req, res) => {
         saveOrdersAtomic(ordersStore);
         saveStoreAtomic(balanceStore);
         pushBalanceToUser(userId);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, balances: getBalances(userId) }));
+        logRoute("pay", req, apiPath, 200, "ton_confirm_paid");
+        sendApiJson(req, res, 200, { ok: true, balances: getBalances(userId) });
       } catch (e) {
         console.error("[pay] ton confirm error", e?.message || e);
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "bad_json" }));
+        sendApiJson(req, res, 400, { ok: false, error: "bad_json" });
       }
     });
     return;
@@ -460,15 +489,14 @@ const server = http.createServer((req, res) => {
     req.on("end", async () => {
       try {
         if (!process.env.TONCENTER_API_KEY) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "toncenter_api_key_missing" }));
+          logRoute("pay", req, apiPath, 500, "toncenter_api_key_missing");
+          sendApiJson(req, res, 500, { ok: false, error: "toncenter_api_key_missing", message: "Не настроен TONCENTER_API_KEY на сервере" });
           return;
         }
         const payload = JSON.parse(body || "{}");
         const walletAddress = safeStr(payload.walletAddress || "", 128);
         if (!walletAddress) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "wallet_required" }));
+          sendApiJson(req, res, 400, { ok: false, error: "wallet_required" });
           return;
         }
         const r = await fetch(`https://toncenter.com/api/v2/getAddressBalance?address=${encodeURIComponent(walletAddress)}`, {
@@ -477,12 +505,11 @@ const server = http.createServer((req, res) => {
         const j = await r.json();
         const nano = BigInt(String(j?.result || "0"));
         const ton = Number(nano) / 1e9;
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, ton: roundMoney(ton) }));
+        logRoute("pay", req, apiPath, 200, "wallet_balance_ok");
+        sendApiJson(req, res, 200, { ok: true, ton: roundMoney(ton) });
       } catch (e) {
         console.error("[pay] wallet balance error", e?.message || e);
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "bad_json" }));
+        sendApiJson(req, res, 400, { ok: false, error: "bad_json" });
       }
     });
     return;
@@ -503,15 +530,27 @@ const server = http.createServer((req, res) => {
       manifest = { ...fallback, ...local };
     } catch {}
     console.info("[manifest] served", pathname, "base=", base);
-    res.writeHead(200, { "Content-Type": "application/json" });
+    res.writeHead(200, withCorsHeaders(req, { "Content-Type": "application/json" }, "GET, OPTIONS"));
     res.end(JSON.stringify(manifest));
     return;
   }
-  if (API_PREFIXES.some(prefix => pathname.startsWith(prefix + "/"))) {
-    writeJson(res, 404, { ok: false, error: "not_found", path: pathname });
+  if (API_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(prefix + "/"))) {
+    logRoute("api", req, apiPath, 404, "not_found");
+    sendApiJson(req, res, 404, { ok: false, error: "not_found", path: pathname });
     return;
   }
-  res.writeHead(404);
+
+  const staticDef = STATIC_FILES[pathname];
+  if (req.method === "GET" && staticDef) {
+    const filePath = path.join(__dirname, staticDef.file);
+    if (fs.existsSync(filePath)) {
+      res.writeHead(200, { "Content-Type": staticDef.type, "Cache-Control": "no-cache" });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+  }
+
+  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
   res.end("Not found");
 });
 
@@ -656,58 +695,105 @@ function isAdminTelegramId(id) {
 
 function parseBalanceCommand(text) {
   const t = String(text || "").trim();
-  let m = t.match(/^\/balance\s+@([a-zA-Z0-9_]{3,64})\s+([0-9]+)\s+(TON|STARS)$/i);
-  if (m) return { by: "username", username: m[1].toLowerCase(), amount: Number(m[2]), currency: m[3].toLowerCase() === "ton" ? "ton" : "stars" };
-  m = t.match(/^\/balance\s+([0-9]{4,20})\s+([0-9]+)\s+(TON|STARS)$/i);
-  if (m) return { by: "id", userId: String(m[1]), amount: Number(m[2]), currency: m[3].toLowerCase() === "ton" ? "ton" : "stars" };
-  return null;
+  const m = t.match(/^\/balance(?:@[a-zA-Z0-9_]{3,64})?\s+(@?[a-zA-Z0-9_]{3,64}|[0-9]{4,20})\s+([0-9]+(?:\.[0-9]+)?)\s+(TON|STARS|XTR)$/i);
+  if (!m) return null;
+  const targetRaw = String(m[1] || "").trim();
+  const amountRaw = String(m[2] || "").trim();
+  const currency = normalizeCurrency(m[3]);
+  if (!currency) return null;
+  const amount = Number(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  if (currency === "stars" && !Number.isInteger(amount)) return { error: "stars_integer_required" };
+  const targetId = targetRaw.match(/^\d{4,20}$/) ? targetRaw : "";
+  if (targetId) return { by: "id", userId: targetId, amount: roundMoney(amount), currency };
+  const username = targetRaw.replace(/^@/, "").toLowerCase();
+  if (!username) return null;
+  return { by: "username", username, amount: roundMoney(amount), currency };
 }
 
 async function processTgUpdate(u) {
-  try {
-    const msgText = u.message?.text || "";
-    const fromId = u.message?.from?.id;
-    const cmd = parseBalanceCommand(msgText);
-    if (cmd) {
-      if (!isAdminTelegramId(fromId)) {
-        if (u.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Нет прав для команды /balance" });
+  const msgText = String(u?.message?.text || "").trim();
+  const fromId = u?.message?.from?.id;
+
+  if (/^\/whoami(?:@\w+)?$/i.test(msgText) && u?.message?.chat?.id) {
+    await tgApi("sendMessage", { chat_id: u.message.chat.id, text: `Ваш Telegram ID: ${fromId || "unknown"}` });
+  }
+
+  if (/^\/balance(?:@\w+)?/i.test(msgText)) {
+    if (!isAdminTelegramId(fromId)) {
+      if (u?.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Нет прав для команды /balance" });
+    } else {
+      const cmd = parseBalanceCommand(msgText);
+      if (!cmd || cmd.error) {
+        const errText = cmd?.error === "stars_integer_required"
+          ? "Для STARS/XTR укажите целое число. Пример: /balance @username 100 STARS"
+          : "Неверный формат. Примеры: /balance @username 0.5 TON, /balance 123456789 100 STARS, /balance@BotUsername @username 1.25 TON";
+        if (u?.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: errText });
       } else {
         let userId = "";
-        if (cmd.by === "id") userId = cmd.userId;
-        else {
-          const matched = Object.keys(balanceStore.users).filter(uid => String(balanceStore.users[uid]?.username || "") === cmd.username);
+        if (cmd.by === "id") {
+          userId = cmd.userId;
+        } else {
+          const matched = Object.keys(balanceStore.users).filter(uid => String(balanceStore.users[uid]?.username || "").replace(/^@/, "").toLowerCase() === cmd.username);
           if (matched.length !== 1) {
-            if (u.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Пользователь не найден" });
-            userId = "";
-          } else userId = matched[0];
+            if (u?.message?.chat?.id) await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Пользователь не найден" });
+          } else {
+            userId = matched[0];
+          }
         }
         if (userId) {
           ensureUserBalance(userId).balances[cmd.currency] = roundMoney(ensureUserBalance(userId).balances[cmd.currency] + cmd.amount);
           saveStoreAtomic(balanceStore);
           pushBalanceToUser(userId);
-          if (u.message?.chat?.id) {
+          if (u?.message?.chat?.id) {
             const who = cmd.by === "id" ? `id ${userId}` : `@${cmd.username}`;
             await tgApi("sendMessage", {
               chat_id: u.message.chat.id,
-              text: `Все начислено: ${who} +${cmd.amount} ${cmd.currency.toUpperCase()}`
+              text: `Начислено: ${who} +${cmd.amount} ${cmd.currency.toUpperCase()}`
             });
           }
         }
       }
-    } else if (String(msgText || "").trim().startsWith('/balance') && u.message?.chat?.id) {
-      await tgApi("sendMessage", { chat_id: u.message.chat.id, text: "Неверный формат. Используйте: /balance @username X TON|STARS или /balance <tg_user_id> X TON|STARS" });
     }
-    if (u.pre_checkout_query?.id) {
+  }
+
+  if (u?.pre_checkout_query?.id) {
+    try {
       await tgApi("answerPreCheckoutQuery", { pre_checkout_query_id: u.pre_checkout_query.id, ok: true });
+    } catch (e) {
+      console.error("[tg] answerPreCheckoutQuery failed", e?.message || e);
     }
-    const sp = u.message?.successful_payment;
-    if (!sp) return;
-    const parsed = parseStarsPayload(sp.invoice_payload);
-    if (!parsed || !parsed.userId || !Number.isInteger(parsed.stars) || parsed.stars <= 0) return;
-    ensureUserBalance(parsed.userId).balances.stars = roundMoney(ensureUserBalance(parsed.userId).balances.stars + parsed.stars);
-    saveStoreAtomic(balanceStore);
-    pushBalanceToUser(parsed.userId);
-  } catch {}
+  }
+
+  const sp = u?.message?.successful_payment;
+  if (!sp) return;
+  const parsed = parseStarsPayload(sp.invoice_payload);
+  if (!parsed || !parsed.userId || !Number.isInteger(parsed.stars) || parsed.stars <= 0) {
+    console.warn("[tg] invalid successful_payment payload", sp?.invoice_payload || "");
+    return;
+  }
+  const paymentKey = String(sp.telegram_payment_charge_id || "");
+  if (paymentKey && Object.values(ordersStore.orders).some(o => o?.externalPaymentId === paymentKey && o?.status === "paid")) {
+    console.info("[tg] stars payment already applied", paymentKey);
+    return;
+  }
+  const orderId = randId("STR");
+  ordersStore.orders[orderId] = {
+    orderId,
+    userId: parsed.userId,
+    stars: parsed.stars,
+    status: "paid",
+    createdAt: now(),
+    paidAt: now(),
+    source: "telegram_stars",
+    payload: sp.invoice_payload,
+    externalPaymentId: paymentKey
+  };
+  ensureUserBalance(parsed.userId).balances.stars = roundMoney(ensureUserBalance(parsed.userId).balances.stars + parsed.stars);
+  saveOrdersAtomic(ordersStore);
+  saveStoreAtomic(balanceStore);
+  pushBalanceToUser(parsed.userId);
+  console.info("[tg] successful_payment applied", parsed.userId, parsed.stars);
 }
 
 async function pollTelegramUpdates() {
@@ -715,14 +801,22 @@ async function pollTelegramUpdates() {
   try {
     const r = await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/getUpdates?timeout=20&offset=${tgUpdateOffset}`);
     const j = await r.json();
-    if (!j?.ok || !Array.isArray(j.result)) return;
+    if (!j?.ok || !Array.isArray(j.result)) {
+      console.error("[tg] getUpdates bad response", j?.description || "unknown_error");
+      return;
+    }
     for (const upd of j.result) {
       tgUpdateOffset = Math.max(tgUpdateOffset, Number(upd.update_id || 0) + 1);
-      await processTgUpdate(upd);
+      try {
+        await processTgUpdate(upd);
+      } catch (e) {
+        console.error("[tg] process update failed", upd?.update_id, e?.message || e);
+      }
     }
-  } catch {}
+  } catch (e) {
+    console.error("[tg] polling error", e?.message || e);
+  }
 }
-
 /** ======================
  *  Data
  ======================= */
@@ -2377,9 +2471,24 @@ server.on("upgrade", (req, socket, head) => {
 
 logEnvWarnings();
 
-server.listen(PORT, "0.0.0.0", () => {
+async function resetTelegramWebhookForPolling() {
+  if (!process.env.BOT_TOKEN) return;
+  try {
+    const info = await tgApi("getWebhookInfo", {});
+    const webhookUrl = String(info?.result?.url || "");
+    if (webhookUrl) {
+      console.warn("[tg] webhook configured, switching to polling", webhookUrl);
+      await tgApi("deleteWebhook", { drop_pending_updates: false });
+    }
+  } catch (e) {
+    console.error("[tg] webhook reset failed", e?.message || e);
+  }
+}
+
+server.listen(PORT, "0.0.0.0", async () => {
   console.log(`🃏 Durak WS started on ws://0.0.0.0:${PORT}/ws`);
   if (process.env.BOT_TOKEN) {
+    await resetTelegramWebhookForPolling();
     setInterval(() => { pollTelegramUpdates(); }, 2500);
     pollTelegramUpdates();
   }

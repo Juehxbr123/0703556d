@@ -1184,6 +1184,7 @@
   document.getElementById("openBotLink").href = BOT_LINK;
 
   const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+  const PUBLIC_BASE_URL = (window.__PUBLIC_BASE_URL__ || localStorage.getItem("evil_public_base_url") || location.origin).trim().replace(/\/$/, "");
   const API_ORIGIN = (window.__API_ORIGIN__ || localStorage.getItem("evil_api_origin") || "").trim();
   const API_PREFIX_RAW = (window.__API_PREFIX__ || localStorage.getItem("evil_api_prefix") || "/api").trim();
 
@@ -1203,9 +1204,7 @@
   ]));
 
   function normalizeApiBase(){
-    if (/^https?:\/\//i.test(API_ORIGIN)) {
-      return API_ORIGIN.replace(/\/$/, "");
-    }
+    if (/^https?:\/\//i.test(API_ORIGIN)) return API_ORIGIN.replace(/\/$/, "");
     return location.origin;
   }
 
@@ -1668,7 +1667,7 @@
       tonOrderInfo.textContent = "Не удалось получить баланс кошелька: " + (e?.message || "ошибка");
     }
   }
-  const tonConnectManifestUrl = "https://durak.clown-on-stonks.fun/tonconnect-manifest.json";
+  const tonConnectManifestUrl = `${PUBLIC_BASE_URL}/tonconnect-manifest.json`;
   console.info("[tonconnect] manifest url", tonConnectManifestUrl);
   const tonConnectUI = (window.TON_CONNECT_UI)
     ? new TON_CONNECT_UI.TonConnectUI({ manifestUrl: tonConnectManifestUrl })
@@ -1689,36 +1688,40 @@
     return `${API_BASE}${pref}${clean}`;
   }
 
+  function humanHttpError(status, apiError) {
+    if (status === 404) return `Маршрут не найден (404): ${apiError || "not_found"}`;
+    if (status === 405) return `Метод не разрешен (405): ${apiError || "method_not_allowed"}`;
+    if (status === 500) return `Ошибка сервера (500): ${apiError || "internal_error"}`;
+    return apiError || `HTTP ${status}`;
+  }
+
   async function safeFetchJson(url, options = {}) {
     const reqOptions = { ...options };
     reqOptions.headers = { "Content-Type": "application/json", ...(options.headers || {}) };
 
     const clean = String(url || "").startsWith("/") ? String(url) : `/${url}`;
-    const candidates = [];
-    if (/^\/pay\//.test(clean)) {
-      for (const pref of API_PREFIXES) candidates.push(buildApiPath(clean, pref));
-      candidates.push(buildApiPath(clean, ""));
-    } else {
-      for (const pref of API_PREFIXES) candidates.push(buildApiPath(clean, pref));
-      candidates.push(buildApiPath(clean, ""));
-    }
-
+    const uniqueCandidates = Array.from(new Set(API_PREFIXES.map(pref => buildApiPath(clean, pref))));
     let lastErr = null;
-    for (const finalUrl of Array.from(new Set(candidates))) {
-      const r = await fetch(finalUrl, reqOptions);
+
+    for (const finalUrl of uniqueCandidates) {
+      let r;
+      try {
+        r = await fetch(finalUrl, reqOptions);
+      } catch (e) {
+        lastErr = new Error(`Сеть недоступна: ${e?.message || "request_failed"}`);
+        continue;
+      }
       const text = await r.text();
       const isJson = (r.headers.get("content-type") || "").includes("application/json");
       let data = null;
       if (text && isJson) {
         try { data = JSON.parse(text); } catch {}
       }
-      if (r.ok && (!data || data.ok !== false)) {
-        if (text && !isJson) throw new Error("Сервер вернул не-JSON ответ");
-        return data || { ok: true };
-      }
-      const msg = data?.error || data?.message || (text && !isJson ? text.slice(0, 180) : `HTTP ${r.status}`);
-      lastErr = new Error(msg === "method_not_allowed" ? "Маршрут недоступен для этого метода (405)." : msg);
-      if (![404, 405].includes(r.status)) break;
+      if (r.ok && (!data || data.ok !== false)) return data || { ok: true };
+
+      const apiError = data?.message || data?.error || (text && !isJson ? text.slice(0, 180) : "");
+      lastErr = new Error(humanHttpError(r.status, apiError));
+      if (![404].includes(r.status)) break;
     }
 
     throw lastErr || new Error("api_request_failed");
@@ -1796,13 +1799,15 @@
       if (tg && typeof tg.openInvoice === "function") {
         tg.openInvoice(j.url, async (status) => {
           if (status === "paid") {
-            currentBalances.stars = Math.floor(Number(currentBalances.stars || 0)) + stars;
-            renderBalance();
-            showToast("Оплата Stars успешна", "success");
+            showToast("Платеж принят, обновляем баланс…", "success");
+            await new Promise(r => setTimeout(r, 1200));
             requestBalance();
             requestLists();
           } else if (status === "failed") {
             showToast("Оплата Stars не завершена", "error");
+          } else {
+            showToast("Счет закрыт. Проверьте баланс через пару секунд.", "info");
+            requestBalance();
           }
         });
       } else tonOrderInfo.textContent = "Оплата доступна только в Telegram.";
@@ -1839,7 +1844,7 @@
       tonOrderInfo.textContent = `Оплата TON: ${ton} отправлена...`;
       await tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [{ address: ord.to, amount: ord.amountNano, payload: ord.comment }]
+        messages: [{ address: ord.to, amount: ord.amountNano, payload: ord.payload || ord.comment }]
       });
       const ok = await pollTonConfirm(ord.orderId, userId);
       tonOrderInfo.textContent = ok ? `Вы пополнили ${ton} TON успешно` : "Не удалось подтвердить TON за время ожидания";

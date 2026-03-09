@@ -1172,13 +1172,13 @@
       </div>
       <div class="row" id="tonTopupControls" style="margin-top:8px; display:none;">
         <input class="input" id="topupTonInput" type="number" min="0.1" step="0.1" value="0.1" style="max-width:120px;" />
-        <button class="btn blue" id="btnPayTon">Пополнить TON</button>
+        <button class="btn blue" id="btnPayTon" type="button">Пополнить TON</button>
       </div>
       <div class="topupPanel" style="margin-top:10px;">
         <div class="topupTag">TELEGRAM STARS</div>
         <div class="topupRow" style="margin-top:6px;">
           <input class="input" id="topupStarsInput" type="number" min="1" step="1" value="1" style="max-width:120px;" />
-          <button class="btn neon" id="btnTopupStars">Пополнить ⭐</button>
+          <button class="btn neon" id="btnTopupStars" type="button">Пополнить ⭐</button>
         </div>
       </div>
       <div class="muted" id="tonOrderInfo" style="margin-top:10px;"></div>
@@ -1198,6 +1198,9 @@
 <script>
   // ===== Config
   const BOT_LINK = "https://t.me/evil_cardsbot";
+  const APP_VERSION = "2026-03-09.1";
+  window.APP_VERSION = APP_VERSION;
+  console.info("[app] version", APP_VERSION);
   document.getElementById("openBotLink").href = BOT_LINK;
 
   const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
@@ -1727,6 +1730,9 @@
     reqOptions.headers = { "Content-Type": "application/json", ...(options.headers || {}) };
 
     const clean = String(url || "").startsWith("/") ? String(url) : `/${url}`;
+    if (["/pay/ton/order", "/pay/ton/confirm", "/pay/ton/wallet-balance", "/pay/stars/link"].includes(clean) && !reqOptions.method) {
+      reqOptions.method = "POST";
+    }
     const uniqueCandidates = Array.from(new Set(API_PREFIXES.map(pref => buildApiPath(clean, pref))));
     let lastErr = null;
 

@@ -824,9 +824,26 @@
     .resultTitle{ font-weight: 1000; font-size: 22px; margin-bottom: 8px; }
     .resultMsg{ opacity:.9; margin-bottom: 12px; }
 
-    .overlayModal{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(2,8,20,.56); backdrop-filter:blur(10px); z-index:1200; padding:16px;}
+    .overlayModal{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(2,8,20,.56); backdrop-filter:blur(10px); z-index:12000; pointer-events:auto; padding:16px;}
     .modalCard{width:min(520px,92vw); border-radius:18px; border:1px solid rgba(110,231,255,.35); background:linear-gradient(180deg,rgba(9,26,41,.92),rgba(7,17,31,.9)); box-shadow:0 16px 45px rgba(0,185,255,.25); padding:16px;}
     .toastStack{position:fixed; top:calc(var(--safe-t) + 10px); right:12px; display:flex; flex-direction:column; gap:8px; z-index:1300;}
+    #topupOverlay{z-index:12500;}
+    #uiModal{z-index:12600;}
+    .tc-root,
+    .tc-root *,
+    [class^="tc-"]{
+      pointer-events:auto;
+    }
+    .tc-root,
+    .tc-modal,
+    .tc-modal__wrap,
+    .tc-notification,
+    [class^="tc-modal"],
+    [class*=" tc-modal"],
+    [data-tc-modal]{
+      z-index:30000 !important;
+    }
+
     .toast{padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.2); background:rgba(8,17,28,.93); color:#dff7ff; font-size:13px; box-shadow:0 10px 20px rgba(0,0,0,.35);}
     .toast.success{border-color:rgba(52,211,153,.45);}
     .toast.error{border-color:rgba(251,113,133,.45);}
@@ -1350,15 +1367,25 @@
     uiModal.style.display = "flex";
   }
 
-  function openTopupModal(currency = "ton") {
+  function openTopupOverlay(currency = "ton") {
     setTab("profile");
     uiModal.style.display = "none";
     if (topupOverlay) topupOverlay.style.display = "flex";
-    if (currency === "ton") {
-      topupTonInput.focus();
-    } else {
-      topupStarsInput.focus();
-    }
+    requestAnimationFrame(() => {
+      if (currency === "ton") topupTonInput.focus();
+      else topupStarsInput.focus();
+    });
+  }
+
+  function closeTopupOverlay() {
+    if (topupOverlay) topupOverlay.style.display = "none";
+  }
+
+  async function openTonConnectFromTopup() {
+    if (!tonConnectUI) throw new Error("ton_connect_missing");
+    closeTopupOverlay();
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 30)));
+    await tonConnectUI.openModal();
   }
 
   function openInsufficientFundsModal(currency, stake, source = "") {
@@ -1367,7 +1394,7 @@
       title: "Недостаточно средств",
       text: `Для ${source === "quick" ? "быстрой игры" : "входа/создания лобби"} требуется ${currencyLabel} ${stake}.`,
       actions: [
-        { label: "Пополнить баланс", variant: "blue", onClick: () => openTopupModal(currency) },
+        { label: "Пополнить баланс", variant: "blue", onClick: () => openTopupOverlay(currency) },
         { label: "Позже", variant: "gray", onClick: () => {} }
       ]
     });
@@ -1375,12 +1402,12 @@
 
   if (profileBalanceChip) {
     profileBalanceChip.classList.add("clickable");
-    profileBalanceChip.onclick = () => openTopupModal("ton");
+    profileBalanceChip.onclick = () => openTopupOverlay("ton");
   }
-  if (btnCloseTopup) btnCloseTopup.onclick = () => { if (topupOverlay) topupOverlay.style.display = "none"; };
+  if (btnCloseTopup) btnCloseTopup.onclick = () => closeTopupOverlay();
   if (topupOverlay) {
     topupOverlay.addEventListener("click", (e) => {
-      if (e.target === topupOverlay) topupOverlay.style.display = "none";
+      if (e.target === topupOverlay) closeTopupOverlay();
     });
   }
 
@@ -1819,7 +1846,7 @@
 
   btnTopupTon.onclick = async () => {
     if (!tonConnectUI) { tonOrderInfo.textContent = "TonConnect недоступен"; return; }
-    if (!tonConnectUI.connected) await tonConnectUI.openModal();
+    if (!tonConnectUI.connected) await openTonConnectFromTopup();
     if (tonConnectUI.account?.address) {
       linkedWalletAddress = tonConnectUI.account.address;
       sendMsg({ type:"wallet_bind", walletAddress: linkedWalletAddress, userKey });
@@ -1834,7 +1861,7 @@
     topupTonInput.value = ton.toFixed(2);
     try {
       if (!tonConnectUI) throw new Error("ton_connect_missing");
-      if (!tonConnectUI.connected) await tonConnectUI.openModal();
+      if (!tonConnectUI.connected) await openTonConnectFromTopup();
       const ord = await safeFetchJson("/pay/ton/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1844,7 +1871,7 @@
       tonOrderInfo.textContent = `Оплата TON: ${ton} отправлена...`;
       await tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [{ address: ord.to, amount: ord.amountNano, payload: ord.payload || ord.comment }]
+        messages: [{ address: ord.to, amount: ord.amountNano, payload: ord.payloadBase64 || ord.payload }]
       });
       const ok = await pollTonConfirm(ord.orderId, userId);
       tonOrderInfo.textContent = ok ? `Вы пополнили ${ton} TON успешно` : "Не удалось подтвердить TON за время ожидания";

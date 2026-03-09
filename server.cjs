@@ -161,6 +161,40 @@ function parseApiPrefixes() {
 
 const API_PREFIXES = parseApiPrefixes();
 
+function getRawPathname(reqUrl) {
+  try {
+    const u = new URL(reqUrl || "/", "http://localhost");
+    return u.pathname || "/";
+  } catch {
+    return "/";
+  }
+}
+
+function createTonCommentPayloadBase64(comment) {
+  const body = Buffer.from(String(comment || ""), "utf8");
+  const bitsLen = 32 + (body.length * 8);
+  const dataBytesLen = Math.ceil(bitsLen / 8);
+  const cellData = Buffer.alloc(dataBytesLen);
+  body.copy(cellData, 4);
+
+  const d1 = 0;
+  const d2 = Math.floor(bitsLen / 8) + Math.ceil(bitsLen / 8);
+  const serializedCell = Buffer.concat([Buffer.from([d1, d2]), cellData]);
+
+  const header = Buffer.from([
+    0xb5, 0xee, 0x9c, 0x72,
+    0x01,
+    0x01,
+    0x01,
+    0x01,
+    0x00,
+    serializedCell.length,
+    0x00
+  ]);
+
+  return Buffer.concat([header, serializedCell]).toString("base64");
+}
+
 const STATIC_FILES = {
   "/": { file: "index.html", type: "text/html; charset=utf-8" },
   "/index.html": { file: "index.html", type: "text/html; charset=utf-8" },
@@ -190,14 +224,17 @@ function sendApiJson(req, res, code, data, extraHeaders = {}) {
   const prefix = getApiPrefixForPath(getRequestPath(req.url));
   writeJson(res, code, data, withCorsHeaders(req, {
     "X-Api-Prefix": prefix || "/",
+    "X-Durak-Backend": "node",
     ...extraHeaders
   }));
 }
 
-function logRoute(kind, req, apiPath, status, reason = "") {
+function logRoute(kind, req, apiPath, status, reason = "", matchedRoute = "") {
   const path = getRequestPath(req?.url);
+  const rawPath = getRawPathname(req?.url);
+  const matched = matchedRoute || apiPath || path;
   const suffix = reason ? ` reason=${reason}` : "";
-  console.info(`[${kind}] ${req?.method || "-"} path=${path} apiPath=${apiPath} status=${status}${suffix}`);
+  console.info(`[${kind}] method=${req?.method || "-"} rawPath=${rawPath} path=${path} apiPath=${apiPath} matched=${matched} status=${status}${suffix}`);
 }
 
 function getRequestPath(reqUrl) {
@@ -251,7 +288,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (PAYMENT_ROUTES.has(apiPath) && req.method !== "POST") {
-    logRoute("pay", req, apiPath, 405, "method_not_allowed");
+    logRoute("pay", req, apiPath, 405, "method_not_allowed", apiPath);
     sendApiJson(req, res, 405, { ok: false, error: "method_not_allowed", method: req.method, allow: ["POST"] }, { Allow: "POST" });
     return;
   }
@@ -359,7 +396,7 @@ const server = http.createServer((req, res) => {
           sendApiJson(req, res, 500, { ok: false, error: "tg_create_invoice_failed", message: "Telegram createInvoiceLink вернул ошибку" });
           return;
         }
-        logRoute("pay", req, apiPath, 200, "stars_link_ok");
+        logRoute("pay", req, apiPath, 200, "stars_link_ok", "/pay/stars/link");
         sendApiJson(req, res, 200, { ok: true, url: j.result });
       } catch (e) {
         console.error("[pay] stars link error", e?.message || e);
@@ -390,11 +427,11 @@ const server = http.createServer((req, res) => {
         const orderId = randId("TON");
         const amountNano = String(BigInt(Math.round(ton * 1e9)));
         const comment = `EVILTOPUP:${orderId}:${userId}`;
-        const payloadB64 = Buffer.from(comment, "utf8").toString("base64");
-        ordersStore.orders[orderId] = { orderId, userId, ton, amountNano, comment, payloadB64, status: "pending", createdAt: now(), txHash: null };
+        const payloadBase64 = createTonCommentPayloadBase64(comment);
+        ordersStore.orders[orderId] = { orderId, userId, ton, amountNano, comment, payloadBase64, status: "pending", createdAt: now(), txHash: null };
         saveOrdersAtomic(ordersStore);
-        logRoute("pay", req, apiPath, 200, "ton_order_created");
-        sendApiJson(req, res, 200, { ok: true, orderId, to: process.env.TON_RECEIVER, amountNano, comment, payload: payloadB64 });
+        logRoute("pay", req, apiPath, 200, "ton_order_created", "/pay/ton/order");
+        sendApiJson(req, res, 200, { ok: true, orderId, to: process.env.TON_RECEIVER, amountNano, comment, payloadBase64, payload: payloadBase64 });
       } catch (e) {
         console.error("[pay] ton order error", e?.message || e);
         sendApiJson(req, res, 400, { ok: false, error: "bad_json" });
@@ -434,7 +471,7 @@ const server = http.createServer((req, res) => {
           return;
         }
         if (ord.status === "paid") {
-          logRoute("pay", req, apiPath, 200, "ton_already_paid");
+          logRoute("pay", req, apiPath, 200, "ton_already_paid", "/pay/ton/confirm");
           sendApiJson(req, res, 200, { ok: true, balances: getBalances(userId), alreadyPaid: true });
           return;
         }
@@ -462,7 +499,7 @@ const server = http.createServer((req, res) => {
         }
         const duplicate = Object.values(ordersStore.orders).find(o => o && o.status === "paid" && o.txHash === foundHash);
         if (duplicate) {
-          logRoute("pay", req, apiPath, 409, "already_used_tx");
+          logRoute("pay", req, apiPath, 409, "already_used_tx", "/pay/ton/confirm");
           sendApiJson(req, res, 409, { ok: false, error: "already_used_tx" });
           return;
         }
@@ -473,7 +510,7 @@ const server = http.createServer((req, res) => {
         saveOrdersAtomic(ordersStore);
         saveStoreAtomic(balanceStore);
         pushBalanceToUser(userId);
-        logRoute("pay", req, apiPath, 200, "ton_confirm_paid");
+        logRoute("pay", req, apiPath, 200, "ton_confirm_paid", "/pay/ton/confirm");
         sendApiJson(req, res, 200, { ok: true, balances: getBalances(userId) });
       } catch (e) {
         console.error("[pay] ton confirm error", e?.message || e);
@@ -505,7 +542,7 @@ const server = http.createServer((req, res) => {
         const j = await r.json();
         const nano = BigInt(String(j?.result || "0"));
         const ton = Number(nano) / 1e9;
-        logRoute("pay", req, apiPath, 200, "wallet_balance_ok");
+        logRoute("pay", req, apiPath, 200, "wallet_balance_ok", "/pay/ton/wallet-balance");
         sendApiJson(req, res, 200, { ok: true, ton: roundMoney(ton) });
       } catch (e) {
         console.error("[pay] wallet balance error", e?.message || e);
@@ -530,12 +567,12 @@ const server = http.createServer((req, res) => {
       manifest = { ...fallback, ...local };
     } catch {}
     console.info("[manifest] served", pathname, "base=", base);
-    res.writeHead(200, withCorsHeaders(req, { "Content-Type": "application/json" }, "GET, OPTIONS"));
+    res.writeHead(200, withCorsHeaders(req, { "Content-Type": "application/json", "X-Durak-Backend": "node" }, "GET, OPTIONS"));
     res.end(JSON.stringify(manifest));
     return;
   }
   if (API_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(prefix + "/"))) {
-    logRoute("api", req, apiPath, 404, "not_found");
+    logRoute("api", req, apiPath, 404, "not_found", apiPath);
     sendApiJson(req, res, 404, { ok: false, error: "not_found", path: pathname });
     return;
   }
